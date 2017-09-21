@@ -2,16 +2,15 @@ __precompile__()
 
 module CuArrays
 
-using CUDAdrv, CUDAnative
+using CUDAdrv, CUDAnative, GPUArrays
 
 export CuArray, CuVector, CuMatrix, cu
 
 include("array.jl")
 include("utils.jl")
-include("indexing.jl")
-include("broadcast.jl")
 include("reduction.jl")
 include("blas.jl")
+include("fft.jl")
 include("dnn.jl")
 
 end # module

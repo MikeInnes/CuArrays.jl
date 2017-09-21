@@ -42,13 +42,13 @@ end
   return val
 end
 
-function reduce_grid(op, v0::T, input::CuDeviceArray{T}, output::CuDeviceArray{T},
+function reduce_grid(f, op, v0::T, input::CuDeviceArray{T}, output::CuDeviceArray{T},
                      len::Integer) where {T}
   val = v0
   i = (blockIdx().x-UInt32(1)) * blockDim().x + threadIdx().x
   step = blockDim().x * gridDim().x
   while i <= len
-    @inbounds val = op(val, input[i])
+    @inbounds val = op(val, f(input[i]))
     i += step
   end
   val = reduce_block(op, v0, val)
@@ -64,28 +64,25 @@ function reduce_cudim(n)
   return threads, blocks
 end
 
-function _reduce(op, v0, input, output,
+function _reduce(f, op, v0, input, output,
                  dim = reduce_cudim(length(input)))
   threads, blocks = dim
   if length(output) < blocks
     throw(ArgumentError("output array too small, should be at least $blocks elements"))
   end
-  @cuda (blocks,threads) reduce_grid(op, v0, input, output, Int32(length(input)))
-  @cuda (1,1024) reduce_grid(op, v0, output, output, Int32(blocks))
+  @cuda (blocks,threads) reduce_grid(f, op, v0, input, output, Int32(length(input)))
+  @cuda (1,1024) reduce_grid(f, op, v0, output, output, Int32(blocks))
   return
 end
 
 # TODO: first elem as v0
 
-function Base.reduce(f, v0::T, xs::CuArray{T}) where T
+function Base.mapreduce(f, op, v0::T, xs::CuArray{T}) where T
   dim = reduce_cudim(length(xs))
   scratch = similar(xs, dim[2])
-  _reduce(f, v0, xs, scratch, dim)
-  return _getindex(scratch, 1)
+  _reduce(f, op, v0, xs, scratch, dim)
+  return GPUArrays._getindex(scratch, 1)
 end
 
 Base.reduce(f, v0, xs::CuArray) =
   reduce(f, convert(eltype(xs), v0), xs)
-
-Base.sum(xs::CuArray) = reduce(+, 0, xs)
-Base.prod(xs::CuArray) = reduce(*, 1, xs)
