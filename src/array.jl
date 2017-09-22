@@ -1,7 +1,15 @@
 using CUDAdrv: OwnedPtr
 using CUDAnative: DevicePtr
 
-mutable struct CuArray{T,N} <: DenseArray{T,N}
+import Base: pointer, similar, size, copy!, convert
+
+import GPUArrays: GPUArray, unsafe_reinterpret, LocalMemory, gpu_sub2ind, _gpu_call
+import GPUArrays: is_gpu, name, threads, blocks, global_memory, local_memory, device
+import GPUArrays: synchronize_threads, AbstractDeviceArray
+
+using GPUArrays: thread_blocks_heuristic
+
+mutable struct CuArray{T,N} <: GPUArray{T,N}
   ptr::OwnedPtr{T}
   dims::NTuple{N,Int}
   function CuArray{T,N}(ptr::OwnedPtr{T}, dims::NTuple{N,Integer}) where {T,N}
@@ -11,109 +19,106 @@ mutable struct CuArray{T,N} <: DenseArray{T,N}
     return xs
   end
 end
+size(A::CuArray) = A.dims
+pointer(A::CuArray) = A.ptr
 
 CuVector{T} = CuArray{T,1}
 CuMatrix{T} = CuArray{T,2}
 
 function unsafe_free!(xs::CuArray)
-  Mem.release(xs.ptr) && CUDAdrv.isvalid(xs.ptr.ctx) && Mem.free(xs.ptr)
-  return
+    Mem.release(xs.ptr) && CUDAdrv.isvalid(xs.ptr.ctx) && Mem.free(xs.ptr)
+    return
 end
 
-CuArray{T,N}(dims::NTuple{N,Integer}) where {T,N} =
-  CuArray{T,N}(Mem.alloc(T, prod(dims)), dims)
 
-CuArray{T}(dims::NTuple{N,Integer}) where {T,N} =
-  CuArray{T,N}(dims)
+function (::Type{CuArray{T,N}})(size::NTuple{N,Integer}) where {T,N}
+    CuArray{T,N}(Mem.alloc(T, prod(size)), size)
+end
 
-CuArray(dims::NTuple{N,Integer}) where N = CuArray{Float32,N}(dims)
+similar(::Type{<: CuArray}, ::Type{T}, size::Base.Dims{N}) where {T, N} =
+  CuArray{T,N}(size)
 
-(T::Type{<:CuArray})(dims::Integer...) = T(dims)
-
-Base.similar(a::CuArray, ::Type{T}, dims::Base.Dims{N}) where {T,N} =
-  CuArray{T,N}(dims)
-
-Base.size(x::CuArray) = x.dims
 Base.sizeof(x::CuArray) = Base.elsize(x) * length(x)
 
-function Base._reshape(parent::CuArray, dims::Dims)
-  n = Base._length(parent)
-  prod(dims) == n || throw(DimensionMismatch("parent has $n elements, which is incompatible with size $dims"))
-  return CuArray{eltype(parent),length(dims)}(parent.ptr, dims)
+
+function unsafe_reinterpret(::Type{T}, A::CuArray{ET}, size::NTuple{N, Integer}) where {T, ET, N}
+    ptr = pointer(A)
+    #Mem.retain(ptr) # TODO do we need to retain in cuda?
+    CuArray{T, N}(OwnedPtr{T}(ptr), size)
 end
 
-# Interop with CPU array
 
-function Base.copy!(dst::CuArray{T}, src::DenseArray{T}) where T
-    @assert length(dst) == length(src)
-    Mem.upload(dst.ptr, pointer(src), length(src) * sizeof(T))
-    return dst
+function Base.copy!{T}(
+        dest::Array{T}, d_offset::Integer,
+        source::CuArray{T}, s_offset::Integer, amount::Integer
+    )
+    amount == 0 && return dest
+    d_offset = d_offset
+    s_offset = s_offset - 1
+    device_ptr = pointer(source)
+    sptr = device_ptr + (sizeof(T) * s_offset)
+    CUDAdrv.Mem.download(Ref(dest, d_offset), sptr, sizeof(T) * (amount))
+    dest
+end
+function Base.copy!{T}(
+        dest::CuArray{T}, d_offset::Integer,
+        source::Array{T}, s_offset::Integer, amount::Integer
+    )
+    amount == 0 && return dest
+    d_offset = d_offset - 1
+    s_offset = s_offset
+    d_ptr = pointer(dest)
+    sptr = d_ptr + (sizeof(T) * d_offset)
+    CUDAdrv.Mem.upload(sptr, Ref(source, s_offset), sizeof(T) * (amount))
+    dest
 end
 
-function Base.copy!(dst::DenseArray{T}, src::CuArray{T}) where T
-    @assert length(dst) == length(src)
-    Mem.download(pointer(dst), src.ptr, length(src) * sizeof(T))
-    return dst
-end
 
-function Base.copy!(dst::CuArray{T}, src::CuArray{T}) where T
-    @assert length(dst) == length(src)
-    Mem.transfer(dst.ptr, src.ptr, length(src) * sizeof(T))
-    return dst
+function Base.copy!{T}(
+        dest::CuArray{T}, d_offset::Integer,
+        source::CuArray{T}, s_offset::Integer, amount::Integer
+    )
+    d_offset = d_offset - 1
+    s_offset = s_offset - 1
+    d_ptr = pointer(dest)
+    s_ptr = pointer(source)
+    dptr = d_ptr + (sizeof(T) * d_offset)
+    sptr = s_ptr + (sizeof(T) * s_offset)
+    CUDAdrv.Mem.transfer(sptr, dptr, sizeof(T) * (amount))
+    dest
 end
 
 Base.collect(x::CuArray{T,N}) where {T,N} =
   copy!(Array{T,N}(size(x)), x)
 
-Base.convert(::Type{T}, x::T) where T <: CuArray = x
-
-Base.convert(::Type{CuArray{T1,N}}, xs::DenseArray{T2,N}) where {T1,T2,N} =
-    copy!(CuArray{T1,N}(size(xs)), xs)
-
-Base.convert(::Type{CuArray{T1}}, xs::DenseArray{T2,N}) where {T1,T2,N} =
-    copy!(CuArray{T1}(size(xs)), xs)
-
-Base.convert(::Type{CuArray}, xs::DenseArray{T,N}) where {T,N} =
-  convert(CuArray{T,N}, xs)
 
 # Interop with CUDAdrv native array
+# Interop with CUDAdrv native array
 
-Base.convert(::Type{CUDAdrv.CuArray{T,N}}, xs::CuArray{T,N}) where {T,N} =
+convert(::Type{CUDAdrv.CuArray{T,N}}, xs::CuArray{T,N}) where {T,N} =
   CUDAdrv.CuArray{T,N}(xs.dims, xs.ptr)
 
-Base.convert(::Type{CUDAdrv.CuArray}, xs::CuArray{T,N}) where {T,N} =
+convert(::Type{CUDAdrv.CuArray}, xs::CuArray{T,N}) where {T,N} =
   convert(CUDAdrv.CuArray{T,N}, xs)
 
-Base.convert(::Type{CuArray{T,N}}, xs::CUDAdrv.CuArray{T,N}) where {T,N} =
+convert(::Type{CuArray{T,N}}, xs::CUDAdrv.CuArray{T,N}) where {T,N} =
   CuArray{T,N}(xs.ptr, xs.shape)
 
-Base.convert(::Type{CuArray}, xs::CUDAdrv.CuArray{T,N}) where {T,N} =
+convert(::Type{CuArray}, xs::CUDAdrv.CuArray{T,N}) where {T,N} =
   convert(CuArray{T,N}, xs)
 
 # Interop with CUDAnative device array
 
-function Base.convert(::Type{CuDeviceArray{T,N,AS.Global}}, a::CuArray{T,N}) where {T,N}
-    ptr = Base.unsafe_convert(Ptr{T}, a.ptr)
+function convert(::Type{CuDeviceArray{T,N,AS.Global}}, a::CuArray{T,N}) where {T,N}
+    ptr = Base.unsafe_convert(Ptr{T}, pointer(a))
     CuDeviceArray{T,N,AS.Global}(a.dims, DevicePtr{T,AS.Global}(ptr))
 end
 
+using Base: RefValue
 CUDAnative.cudaconvert(a::CuArray{T,N}) where {T,N} = convert(CuDeviceArray{T,N,AS.Global}, a)
+CUDAnative.cudaconvert(a::RefValue{CuArray{T,N}}) where {T,N} = RefValue(convert(CuDeviceArray{T,N,AS.Global}, a[]))
 
 # Utils
-
-Base.show(io::IO, ::Type{CuArray{T,N}}) where {T,N} =
-  print(io, "CuArray{$T,$N}")
-
-function Base.showarray(io::IO, X::CuArray, repr::Bool = true; header = true)
-  if repr
-    print(io, "CuArray(")
-    Base.showarray(io, collect(X), true)
-    print(io, ")")
-  else
-    header && println(io, summary(X), ":")
-    Base.showarray(io, collect(X), false, header = false)
-  end
-end
 
 cu(x) = x
 cu(x::CuArray) = x
@@ -121,3 +126,52 @@ cu(x::CuArray) = x
 cu(xs::AbstractArray) = isbits(xs) ? xs : CuArray(xs)
 
 Base.getindex(::typeof(cu), xs...) = CuArray([xs...])
+
+#Abstract GPU interface
+immutable CUKernelState end
+
+@inline function LocalMemory(::CUKernelState, ::Type{T}, ::Val{N}, ::Val{C}) where {T, N, C}
+    CUDAnative.generate_static_shmem(Val{C}, T, Val{N})
+end
+
+(::Type{AbstractDeviceArray})(A::CuDeviceArray, shape) = CuDeviceArray(shape, pointer(A))
+
+
+@inline synchronize_threads(::CUKernelState) = CUDAnative.sync_threads()
+
+for (i, sym) in enumerate((:x, :y, :z))
+    for (f, fcu) in (
+            (:blockidx, :blockIdx),
+            (:blockdim, :blockDim),
+            (:threadidx, :threadIdx),
+            (:griddim, :gridDim)
+        )
+        fname = Symbol(string(f, '_', sym))
+        cufun = Symbol(string(fcu, '_', sym))
+        @eval GPUArrays.$fname(::CUKernelState)::Cuint = CUDAnative.$cufun()
+    end
+end
+
+devices() = CUDAdrv.devices()
+GPUArrays.device(A::CuArray) = CUDAnative.default_device[]
+is_gpu(dev::CUDAdrv.CuDevice) = true
+name(dev::CUDAdrv.CuDevice) = string("CU ", CUDAdrv.name(dev))
+threads(dev::CUDAdrv.CuDevice) = CUDAdrv.attribute(dev, CUDAdrv.MAX_THREADS_PER_BLOCK)
+
+function blocks(dev::CUDAdrv.CuDevice)
+    (
+        CUDAdrv.attribute(dev, CUDAdrv.MAX_BLOCK_DIM_X),
+        CUDAdrv.attribute(dev, CUDAdrv.MAX_BLOCK_DIM_Y),
+        CUDAdrv.attribute(dev, CUDAdrv.MAX_BLOCK_DIM_Z),
+    )
+end
+
+free_global_memory(dev::CUDAdrv.CuDevice) = CUDAdrv.Mem.info()[1]
+global_memory(dev::CUDAdrv.CuDevice) = CUDAdrv.totalmem(dev)
+local_memory(dev::CUDAdrv.CuDevice) = CUDAdrv.attribute(dev, CUDAdrv.TOTAL_CONSTANT_MEMORY)
+
+
+function _gpu_call(f, A::CuArray, args::Tuple, blocks_threads::Tuple{T, T}) where T <: NTuple{N, Integer} where N
+    blocks, threads = blocks_threads
+    @cuda (blocks, threads) f(CUKernelState(), args...)
+end

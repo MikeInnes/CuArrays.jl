@@ -1,11 +1,10 @@
 using Base.Cartesian
 
+cudims(a::AbstractArray) = cudims(length(a))
 function cudims(n::Integer)
   threads = 256
   Base.ceil(Int, n / threads), threads
 end
-
-cudims(a::AbstractArray) = cudims(length(a))
 
 @inline ind2sub_(a::AbstractArray{T,0}, i) where T = ()
 @inline ind2sub_(a, i) = ind2sub(a, i)
@@ -19,56 +18,7 @@ macro cuindex(A)
   end
 end
 
-function Base.fill!(xs::CuArray, x)
-  function kernel(xs, x)
-    I = @cuindex xs
-    xs[I...] = x
-    return
-  end
-  blk, thr = cudims(xs)
-  @cuda (blk, thr) kernel(xs, convert(eltype(xs), x))
-  return xs
-end
-
-Base.fill(::Type{CuArray}, x, dims) = fill!(CuArray{typeof(x)}(dims), x)
-
-genperm(I::NTuple{N}, perm::NTuple{N}) where N =
-  ntuple(d->I[perm[d]], Val{N})
-
-function Base.permutedims!(dest::CuArray, src::CuArray, perm)
-  function kernel(dest, src, perm)
-    I = @cuindex dest
-    @inbounds dest[I...] = src[genperm(I, perm)...]
-    return
-  end
-  blk, thr = cudims(dest)
-  @cuda (blk, thr) kernel(dest, src, perm)
-  return dest
-end
-
-allequal(x) = true
-allequal(x, y, z...) = x == y && allequal(y, z...)
-
-function Base.map!(f, y::CuArray, xs::CuArray...)
-  @assert allequal(size.((y, xs...))...)
-  return y .= f.(xs...)
-end
-
-function Base.map(f, y::CuArray, xs::CuArray...)
-  @assert allequal(size.((y, xs...))...)
-  return f.(y, xs...)
-end
-
-# Break ambiguities with base
-Base.map!(f, y::CuArray) =
-  invoke(map!, Tuple{Any,CuArray,Vararg{CuArray}}, f, y)
-Base.map!(f, y::CuArray, x::CuArray) =
-  invoke(map!, Tuple{Any,CuArray,Vararg{CuArray}}, f, y, x)
-Base.map!(f, y::CuArray, x1::CuArray, x2::CuArray) =
-  invoke(map!, Tuple{Any,CuArray,Vararg{CuArray}}, f, y, x1, x2)
-
 # Concatenation
-
 @generated function nindex(i::Int, ls::NTuple{N}) where N
   quote
     Base.@_inline_meta
@@ -102,3 +52,19 @@ end
 
 Base.vcat(xs::CuArray...) = cat(1, xs...)
 Base.hcat(xs::CuArray...) = cat(2, xs...)
+
+
+#=
+Having only sum implemented here for device arrays is a bit random, but this is
+hopefully a start to have most algorithms also work on the device arrays.
+Sadly, Base.sum on it's own is still a bit too complex to just work here.
+# TODO Make CuDeviceArray inherit from GPUArrays.AbstractDeviceArray to have these
+# function definition in one place.
+=#
+function Base.sum(A::CUDAnative.CuDeviceArray{T}) where T
+    acc = zero(T)
+    for elem in A
+        acc += elem
+    end
+    acc
+end
