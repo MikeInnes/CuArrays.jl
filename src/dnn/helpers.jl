@@ -92,12 +92,12 @@ end
 pdsize(w, nd)=Cint[reverse(psize(w,nd))...]
 psize(w, nd)=(isa(w,Integer)  ? fill(w,nd) : length(w) != nd ? error("Dimension mismatch") : w)
 
-function ConvDesc(T, N, padding, stride, upscale, mode)
+function ConvDesc(T, N, padding, stride, dilation, upscale, mode)
     cd = cudnnConvolutionDescriptor_t[0]
     cudnnCreateConvolutionDescriptor(cd)
-    CUDNN_VERSION >= 4000 ? cudnnSetConvolutionNdDescriptor(cd[1],N,cdsize(padding,N),cdsize(stride,N),cdsize(upscale,N),mode,cudnnDataType(T)) :
-    CUDNN_VERSION >= 3000 ? cudnnSetConvolutionNdDescriptor_v3(cd[1],N,cdsize(padding,N),cdsize(stride,N),cdsize(upscale,N),mode,cudnnDataType(T)) :
-    cudnnSetConvolutionNdDescriptor(cd[1],N,cdsize(padding,N),cdsize(stride,N),cdsize(upscale,N),mode)
+    CUDNN_VERSION >= 4000 ? cudnnSetConvolutionNdDescriptor(cd[1],N,cdsize(padding,N),cdsize(stride,N),cdsize(dilation,N),cdsize(upscale,N),mode,cudnnDataType(T)) :
+    CUDNN_VERSION >= 3000 ? cudnnSetConvolutionNdDescriptor_v3(cd[1],N,cdsize(padding,N),cdsize(stride,N),cdsize(dilation,N),cdsize(upscale,N),mode,cudnnDataType(T)) :
+    cudnnSetConvolutionNdDescriptor(cd[1],N,cdsize(padding,N),cdsize(stride,N),cdsize(dilation,N),cdsize(upscale,N),mode)
     this = ConvDesc(cd[1])
     finalizer(this, free)
     return this
