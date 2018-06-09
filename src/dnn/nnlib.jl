@@ -60,18 +60,18 @@ end
 # Convolution
 
 function conv!(y::A, x::A, w::A;
-               pad=0, stride=1, mode=0, alpha=1) where A<:CuArray{<:CUDNNFloat}
-  cudnnConvolutionForward(y, x, w, padding=pad, stride=stride, mode=mode, alpha=alpha)
+               pad=0, stride=1, dilation=1, mode=0, alpha=1) where A<:CuArray{<:CUDNNFloat}
+  cudnnConvolutionForward(y, x, w, padding=pad, stride=stride, dilation=dilation, mode=mode, alpha=alpha)
 end
 
 function ∇conv_filter!(dw::A, dy::A, x::A, w::A;
-                       pad=0, stride=1, mode=0, alpha=1) where A<:CuArray{<:CUDNNFloat}
-  cudnnConvolutionBackwardFilter(dw, x, w, dy, padding=pad, stride=stride, mode=mode, alpha=alpha)
+                       pad=0, stride=1, dilation=1, mode=0, alpha=1) where A<:CuArray{<:CUDNNFloat}
+  cudnnConvolutionBackwardFilter(dw, x, w, dy, padding=pad, stride=stride, dilation=dilation, mode=mode, alpha=alpha)
 end
 
 function ∇conv_data!(dx::A, dy::A, x::A, w::A;
-                     pad=0, stride=1, mode=0, alpha=1) where A<:CuArray{<:CUDNNFloat}
-  cudnnConvolutionBackwardData(dx, x, w, dy, padding=pad, stride=stride, mode=mode, alpha=alpha)
+                     pad=0, stride=1, dilation=1, mode=0, alpha=1) where A<:CuArray{<:CUDNNFloat}
+  cudnnConvolutionBackwardData(dx, x, w, dy, padding=pad, stride=stride, dilation=dilation, mode=mode, alpha=alpha)
 end
 
 
