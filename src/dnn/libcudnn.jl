@@ -62,12 +62,12 @@ function cudnnCreateConvolutionDescriptor(convDesc)
     @check ccall((:cudnnCreateConvolutionDescriptor,libcudnn),cudnnStatus_t,(Ptr{cudnnConvolutionDescriptor_t},),convDesc)
 end
 
-function cudnnSetConvolutionNdDescriptor(convDesc,arrayLength,padA,filterStrideA,upscaleA,mode,dataType)
-    @check ccall((:cudnnSetConvolutionNdDescriptor,libcudnn),cudnnStatus_t,(cudnnConvolutionDescriptor_t,Cint,Ptr{Cint},Ptr{Cint},Ptr{Cint},cudnnConvolutionMode_t,cudnnDataType_t),convDesc,arrayLength,padA,filterStrideA,upscaleA,mode,dataType)
+function cudnnSetConvolutionNdDescriptor(convDesc,arrayLength,padA,filterStrideA,dilationA,upscaleA,mode,dataType)
+    @check ccall((:cudnnSetConvolutionNdDescriptor,libcudnn),cudnnStatus_t,(cudnnConvolutionDescriptor_t,Cint,Ptr{Cint},Ptr{Cint},Ptr{Cint},Ptr{Cint},cudnnConvolutionMode_t,cudnnDataType_t),convDesc,arrayLength,padA,filterStrideA,dilationA,upscaleA,mode,dataType)
 end
 
-function cudnnGetConvolutionNdDescriptor(convDesc,arrayLengthRequested,arrayLength,padA,strideA,upscaleA,mode,dataType)
-    @check ccall((:cudnnGetConvolutionNdDescriptor,libcudnn),cudnnStatus_t,(cudnnConvolutionDescriptor_t,Cint,Ptr{Cint},Ptr{Cint},Ptr{Cint},Ptr{Cint},Ptr{cudnnConvolutionMode_t},Ptr{cudnnDataType_t}),convDesc,arrayLengthRequested,arrayLength,padA,strideA,upscaleA,mode,dataType)
+function cudnnGetConvolutionNdDescriptor(convDesc,arrayLengthRequested,arrayLength,padA,strideA,dilationA,upscaleA,mode,dataType)
+    @check ccall((:cudnnGetConvolutionNdDescriptor,libcudnn),cudnnStatus_t,(cudnnConvolutionDescriptor_t,Cint,Ptr{Cint},Ptr{Cint},Ptr{Cint},Ptr{Cint},Ptr{Cint},Ptr{cudnnConvolutionMode_t},Ptr{cudnnDataType_t}),convDesc,arrayLengthRequested,arrayLength,padA,strideA,dilationA,upscaleA,mode,dataType)
 end
 
 function cudnnDestroyConvolutionDescriptor(convDesc)
@@ -127,8 +127,8 @@ end
 
 function cudnnConvolutionForward(y::CuArray{T,N}, x::CuArray{T,N}, w::CuArray{T,N};
                                  handle=libcudnn_handle[], algo=0, workSpace=C_NULL, workSpaceSizeInBytes=0,
-                                 alpha=1, beta=0, padding=0, stride=1, upscale=1, mode=0) where {T,N}
-    cd = ConvDesc(T, N-2, padding, stride, upscale, mode)
+                                 alpha=1, beta=0, padding=0, stride=1, dilation=1, upscale=1, mode=0) where {T,N}
+    cd = ConvDesc(T, N-2, padding, stride, dilation, upscale, mode)
     cudnnConvolutionForward(
       handle,Ref(T(alpha)),TensorDesc(x),x,FilterDesc(w),w,cd,algo,workSpace,
       workSpaceSizeInBytes,Ref(T(beta)),TensorDesc(y),y)
@@ -141,8 +141,8 @@ end
 
 function cudnnConvolutionBackwardData(dx::CuArray{T,N}, x::CuArray{T,N}, w::CuArray{T,N}, dy::CuArray{T,N};
                                       handle=libcudnn_handle[], algo=0, workSpace=C_NULL, workSpaceSizeInBytes=0,
-                                      alpha=1, beta=0, padding=0, stride=1, upscale=1, mode=0) where {T,N}
-    cd = ConvDesc(T, N-2, padding, stride, upscale, mode)
+                                      alpha=1, beta=0, padding=0, stride=1, dilation=1, upscale=1, mode=0) where {T,N}
+    cd = ConvDesc(T, N-2, padding, stride, dilation, upscale, mode)
     cudnnConvolutionBackwardData(
         handle,Ref(T(alpha)),FilterDesc(w),w,TensorDesc(dy),dy,cd,algo,workSpace,
         workSpaceSizeInBytes,Ref(T(beta)),TensorDesc(dx),dx)
@@ -155,8 +155,8 @@ end
 
 function cudnnConvolutionBackwardFilter(dw::CuArray{T,N}, x::CuArray{T,N}, w::CuArray{T,N}, dy::CuArray{T,N};
                                         handle=libcudnn_handle[], algo=0, workSpace=C_NULL, workSpaceSizeInBytes=0,
-                                        alpha=1, beta=0, padding=0, stride=1, upscale=1, mode=0) where {T,N}
-    cd = ConvDesc(T, N-2, padding, stride, upscale, mode)
+                                        alpha=1, beta=0, padding=0, stride=1, dilation=1, upscale=1, mode=0) where {T,N}
+    cd = ConvDesc(T, N-2, padding, stride, dilation, upscale, mode)
     cudnnConvolutionBackwardFilter(
         handle,Ref(T(alpha)),TensorDesc(x),x,TensorDesc(dy),dy,cd,algo,workSpace,
         workSpaceSizeInBytes,Ref(T(beta)),FilterDesc(dw),dw)
