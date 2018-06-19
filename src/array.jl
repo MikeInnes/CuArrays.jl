@@ -16,6 +16,8 @@ end
 
 CuArray{T,N}(buf::Mem.Buffer, dims::NTuple{N,Integer}) where {T,N} = CuArray{T,N}(buf, 0, dims)
 
+Base.pointer(A::CuArray) = unsafe_buffer(A)
+
 CuVector{T} = CuArray{T,1}
 CuMatrix{T} = CuArray{T,2}
 CuVecOrMat{T} = Union{CuVector{T},CuMatrix{T}}
@@ -55,19 +57,19 @@ end
 
 # Interop with CPU array
 
-function Base.copy!(dst::CuArray{T}, src::Array{T}) where T
+function Base.copyto!(dst::CuArray{T}, src::Array{T}) where T
     @assert length(dst) == length(src)
     Mem.upload!(unsafe_buffer(dst), src)
     return dst
 end
 
-function Base.copy!(dst::Array{T}, src::CuArray{T}) where T
+function Base.copyto!(dst::Array{T}, src::CuArray{T}) where T
     @assert length(dst) == length(src)
     Mem.download!(dst, unsafe_buffer(src))
     return dst
 end
 
-function Base.copy!(dst::CuArray{T}, src::CuArray{T}) where T
+function Base.copyto!(dst::CuArray{T}, src::CuArray{T}) where T
     @assert length(dst) == length(src)
     Mem.transfer!(unsafe_buffer(dst), unsafe_buffer(src), sizeof(src))
     return dst
@@ -132,17 +134,19 @@ cuones(dims...) = cuones(Float32, dims...)
 
 Base.show(io::IO, ::Type{CuArray{T,N}}) where {T,N} =
   print(io, "CuArray{$T,$N}")
+Base.show(io::IO, ::Type{CuArray}) =
+    print(io, "CuArray{$T,$N}")
 
-function Base.showarray(io::IO, X::CuArray, repr::Bool = true; header = true)
-  if repr
-    print(io, "CuArray(")
-    Base.showarray(io, collect(X), true)
-    print(io, ")")
-  else
-    header && println(io, summary(X), ":")
-    Base.showarray(io, collect(X), false, header = false)
-  end
-end
+# function Base.showarray(io::IO, X::CuArray, repr::Bool = true; header = true)
+#   if repr
+#     print(io, "CuArray(")
+#     Base.showarray(io, collect(X), true)
+#     print(io, ")")
+#   else
+#     header && println(io, summary(X), ":")
+#     Base.showarray(io, collect(X), false, header = false)
+#   end
+# end
 
 import Adapt: adapt, adapt_
 

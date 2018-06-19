@@ -23,13 +23,13 @@ include("memory.jl")
 include("array.jl")
 include("utils.jl")
 include("indexing.jl")
-include("broadcast.jl")
 
 include("blas/CUBLAS.jl")
 include("solver/CUSOLVER.jl")
 include("fft/CUFFT.jl")
 include("rand/CURAND.jl")
 include("gpuarray_interface.jl")
+include("broadcast.jl")
 
 cudnn_available() = libcudnn ≠ nothing
 if cudnn_available()

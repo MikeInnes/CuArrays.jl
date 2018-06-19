@@ -1,16 +1,16 @@
 # Pkg.test runs with --check_bounds=1, forcing all bounds checks.
 # This is incompatible with CUDAnative (see JuliaGPU/CUDAnative.jl#98)
-if Base.JLOptions().check_bounds == 1
-  run(```
-    $(Base.julia_cmd())
-    --color=$(Base.have_color ? "yes" : "no")
-    --compilecache=$(Bool(Base.JLOptions().use_compilecache) ? "yes" : "no")
-    --startup-file=$(Base.JLOptions().startupfile != 2 ? "yes" : "no")
-    --code-coverage=$(["none", "user", "all"][1+Base.JLOptions().code_coverage])
-    $(@__FILE__)
-    ```)
-  exit()
-end
+# if Base.JLOptions().check_bounds == 1
+#   run(```
+#     $(Base.julia_cmd())
+#     --color=$(Base.have_color ? "yes" : "no")
+#     --compilecache=$(Bool(Base.JLOptions().use_compilecache) ? "yes" : "no")
+#     --startup-file=$(Base.JLOptions().startupfile != 2 ? "yes" : "no")
+#     --code-coverage=$(["none", "user", "all"][1+Base.JLOptions().code_coverage])
+#     $(@__FILE__)
+#     ```)
+#   exit()
+# end
 
 using CuArrays
 using CuArrays: @fix
@@ -37,7 +37,7 @@ end
 using Base.Test, GPUArrays.TestSuite
 
 @testset "CuArrays" begin
-@testset "GPUArray Testsuite: $(CUDAnative.default_device[])" begin
+@testset "GPUArray Testsuite:" begin
     TestSuite.run_gpuinterface(CuArray)
     TestSuite.run_base(CuArray)
     TestSuite.run_blas(CuArray)
