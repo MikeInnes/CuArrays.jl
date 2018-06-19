@@ -9,41 +9,34 @@ n = 10
 l = 13
 k = 1
 
-@testset for elty in [Float32, Float64, Complex64, Complex128]
-    @testset "potrf!" begin
+@testset "elty = $elty" for elty in [Float32, Float64, Complex64, Complex128]
+    @testset "Cholesky (po)" begin
         A    = rand(elty,n,n)
         A    = A*A' #posdef
+        B    = rand(elty,n,n)
         d_A  = CuArray(A)
-        d_A  = CUSOLVER.potrf!('U',d_A)
-        h_A  = collect(d_A)
-        cA,_ = LAPACK.potrf!('U',A)
-        @test h_A ≈ cA
+        d_B  = CuArray(B)
+
+        d_F  = cholfact(d_A)
+        F    = cholfact(A)
+        @test F[:U]   ≈ collect(d_F[:U])
+        @test F\(A'B) ≈ collect(d_F\(d_A'd_B))
+
+        d_F  = cholfact(Hermitian(d_A, :L))
+        F    = cholfact(Hermitian(A, :L))
+        @test F[:L]   ≈ collect(d_F[:L])
+        @test F\(A'B) ≈ collect(d_F\(d_A'd_B))
+
+        @test_throws DimensionMismatch Base.LinAlg.LAPACK.potrs!('U',d_A,CuArray(rand(elty,m,m)))
+
         A    = rand(elty,m,n)
         d_A  = CuArray(A)
-        @test_throws DimensionMismatch CUSOLVER.potrf!('U',d_A)
+        @test_throws ArgumentError cholfact(d_A)
+        @test_throws DimensionMismatch Base.LinAlg.LAPACK.potrs!('U',d_A,d_B)
+
         A    = zeros(elty,n,n)
         d_A  = CuArray(A)
-        @test_throws Base.LinAlg.SingularException CUSOLVER.potrf!('U',d_A)
-    end
-    @testset "potrs!" begin
-        A     = rand(elty,n,n)
-        A     = A*A' #posdef
-        d_A   = CuArray(A)
-        d_A   = CUSOLVER.potrf!('U',d_A)
-        h_A   = collect(d_A)
-        B     = rand(elty,n,n)
-        d_B   = CuArray(B)
-        d_B   = CUSOLVER.potrs!('U',d_A,d_B)
-        h_B   = collect(d_B)
-        @test h_B ≈ LAPACK.potrs!('U',h_A,B)
-        A    = rand(elty,m,n)
-        d_A  = CuArray(A)
-        @test_throws DimensionMismatch CUSOLVER.potrs!('U',d_A,d_B)
-        A    = rand(elty,n,n)
-        d_A  = CuArray(A)
-        B     = rand(elty,m,m)
-        d_B   = CuArray(B)
-        @test_throws DimensionMismatch CUSOLVER.potrs!('U',d_A,d_B)
+        @test_throws Base.LinAlg.PosDefException cholfact(d_A)
     end
 
     @testset "getrf!" begin
