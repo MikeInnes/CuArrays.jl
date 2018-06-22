@@ -8,7 +8,7 @@ end
 cudims(a::AbstractArray) = cudims(length(a))
 
 @inline ind2sub_(a::AbstractArray{T,0}, i) where T = ()
-@inline ind2sub_(a, i) = ind2sub(a, i)
+@inline ind2sub_(a, i) = Tuple(CartesianIndices(a)[i])
 
 macro cuindex(A)
   quote
@@ -26,7 +26,7 @@ function Base.fill!(xs::CuArray, x)
     return
   end
   blk, thr = cudims(xs)
-  @cuda (blk, thr) kernel(xs, convert(eltype(xs), x))
+  @cuda blocks=blk threads=thr kernel(xs, convert(eltype(xs), x))
   return xs
 end
 
@@ -42,7 +42,7 @@ function Base.permutedims!(dest::CuArray, src::CuArray, perm::NTuple)
     return
   end
   blk, thr = cudims(dest)
-  @cuda (blk, thr) kernel(dest, src, perm)
+  @cuda blocks=blk threads=thr kernel(dest, src, perm)
   return dest
 end
 
@@ -54,7 +54,7 @@ allequal(x, y, z...) = x == y && allequal(y, z...)
 
 function Base.map!(f, y::CuArray, xs::CuArray...)
   @assert allequal(size.((y, xs...))...)
-  return y .= f.(xs...)
+  return y .= f.(xs...,)
 end
 
 function Base.map(f, y::CuArray, xs::CuArray...)
@@ -102,7 +102,7 @@ function _cat(dim, dest, xs...)
   end
   xs = growdims.(dim, xs)
   blk, thr = cudims(dest)
-  @cuda (blk, thr) kernel(dim, dest, xs)
+  @cuda blocks=blk threads=thr kernel(dim, dest, xs)
   return dest
 end
 

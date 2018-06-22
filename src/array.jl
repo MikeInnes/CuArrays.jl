@@ -9,7 +9,7 @@ mutable struct CuArray{T,N} <: GPUArray{T,N}
   function CuArray{T,N}(buf::Mem.Buffer, offset::Integer, dims::NTuple{N,Integer}) where {T,N}
     xs = new{T,N}(buf, offset, dims)
     Mem.retain(buf)
-    finalizer(xs, unsafe_free!)
+    finalizer(unsafe_free!, xs)
     return xs
   end
 end
@@ -29,7 +29,7 @@ unsafe_buffer(xs::CuArray) =
   Mem.Buffer(xs.buf.ptr+xs.offset, sizeof(xs), xs.buf.ctx)
 
 Base.cconvert(::Type{Ptr{T}}, x::CuArray{T}) where T = unsafe_buffer(x)
-Base.cconvert(::Type{Ptr{Void}}, x::CuArray) = unsafe_buffer(x)
+Base.cconvert(::Type{Ptr{Nothing}}, x::CuArray) = unsafe_buffer(x)
 
 CuArray{T,N}(dims::NTuple{N,Integer}) where {T,N} =
   CuArray{T,N}(alloc(prod(dims)*sizeof(T)), dims)
@@ -38,6 +38,8 @@ CuArray{T}(dims::NTuple{N,Integer}) where {T,N} =
   CuArray{T,N}(dims)
 
 CuArray(dims::NTuple{N,Integer}) where N = CuArray{Float32,N}(dims)
+
+(::Type{T})(::UndefInitializer, dims...) where T<:CuArray = T(dims...)
 
 (T::Type{<:CuArray})(dims::Integer...) = T(dims)
 
@@ -76,7 +78,7 @@ end
 Base.collect(x::CuArray{T,N}) where {T,N} =
   copy!(Array{T,N}(size(x)), x)
 
-function Base.deepcopy_internal(x::CuArray, dict::ObjectIdDict)
+function Base.deepcopy_internal(x::CuArray, dict::IdDict)
   haskey(dict, x) && return dict[x]::typeof(x)
   return dict[x] = copy(x)
 end
@@ -133,16 +135,16 @@ cuones(dims...) = cuones(Float32, dims...)
 Base.show(io::IO, ::Type{CuArray{T,N}}) where {T,N} =
   print(io, "CuArray{$T,$N}")
 
-function Base.showarray(io::IO, X::CuArray, repr::Bool = true; header = true)
-  if repr
-    print(io, "CuArray(")
-    Base.showarray(io, collect(X), true)
-    print(io, ")")
-  else
-    header && println(io, summary(X), ":")
-    Base.showarray(io, collect(X), false, header = false)
-  end
-end
+# function Base.showarray(io::IO, X::CuArray, repr::Bool = true; header = true)
+#   if repr
+#     print(io, "CuArray(")
+#     Base.showarray(io, collect(X), true)
+#     print(io, ")")
+#   else
+#     header && println(io, summary(X), ":")
+#     Base.showarray(io, collect(X), false, header = false)
+#   end
+# end
 
 import Adapt: adapt, adapt_
 

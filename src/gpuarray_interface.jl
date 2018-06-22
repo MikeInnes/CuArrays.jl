@@ -3,7 +3,7 @@ import GPUArrays
 Base.similar(::Type{<:CuArray}, ::Type{T}, size::Base.Dims{N}) where {T, N} = CuArray{T, N}(size)
 
 #Abstract GPU interface
-immutable CuKernelState end
+struct CuKernelState end
 
 @inline function GPUArrays.LocalMemory(::CuKernelState, ::Type{T}, ::Val{N}, ::Val{C}) where {T, N, C}
     CUDAnative.generate_static_shmem(Val{C}, T, Val{N})
@@ -57,8 +57,8 @@ GPUArrays.local_memory(dev::CUDAdrv.CuDevice) = CUDAdrv.attribute(dev, CUDAdrv.T
 
 
 function GPUArrays._gpu_call(f, A::CuArray, args::Tuple, blocks_threads::Tuple{T, T}) where T <: NTuple{N, Integer} where N
-    blocks, threads = blocks_threads
-    @cuda (blocks, threads) f(CuKernelState(), args...)
+    blk, thr = blocks_threads
+    @cuda blocks=blk threads=thr f(CuKernelState(), args...)
 end
 
 # Save reinterpret and reshape implementation use this in GPUArrays
@@ -68,10 +68,10 @@ end
 
 # Additional copy methods
 
-function Base.copy!{T}(
+function Base.copyto!(
         dest::Array{T}, d_offset::Integer,
         source::CuArray{T}, s_offset::Integer, amount::Integer
-    )
+    ) where T
     amount == 0 && return dest
     d_offset = d_offset
     s_offset = s_offset - 1
@@ -80,10 +80,10 @@ function Base.copy!{T}(
     dest
 end
 
-function Base.copy!{T}(
+function Base.copyto!(
         dest::CuArray{T}, d_offset::Integer,
         source::Array{T}, s_offset::Integer, amount::Integer
-    )
+    ) where T
     amount == 0 && return dest
     d_offset = d_offset - 1
     s_offset = s_offset
@@ -92,10 +92,10 @@ function Base.copy!{T}(
     dest
 end
 
-function Base.copy!{T}(
+function Base.copyto!(
         dest::CuArray{T}, d_offset::Integer,
         source::CuArray{T}, s_offset::Integer, amount::Integer
-    )
+    ) where T
     d_offset = d_offset - 1
     s_offset = s_offset - 1
     d_ptr = dest.ptr
