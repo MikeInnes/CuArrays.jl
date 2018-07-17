@@ -61,23 +61,29 @@ end
 
 function conv!(y::A, x::A, w::A;
                pad = 0, stride = 1, mode = 0,
-               alpha = 1, dilation = 1) where A<:CuArray{<:CUDNNFloat}
+               alpha = 1, dilation = 1, workSpace = C_NULL,
+               workSpaceSizeInBytes = 0) where A<:CuArray{<:CUDNNFloat}
   all(x -> x == 1, dilation) || error("Only dilation = 1 is supported in CuArrays")
-  cudnnConvolutionForward(y, x, w, padding=pad, stride=stride, mode=mode, alpha=alpha)
+  cudnnConvolutionForward(y, x, w, padding=pad, stride=stride, mode=mode, alpha=alpha,
+                          workSpace=workSpace, workSpaceSizeInBytes=workSpaceSizeInBytes)
 end
 
 function ∇conv_filter!(dw::A, dy::A, x::A, w::A;
                        pad = 0, stride = 1, mode = 0,
-                       alpha = 1, dilation = 1) where A<:CuArray{<:CUDNNFloat}
+                       alpha = 1, dilation = 1, workSpace = C_NULL,
+                       workSpaceSizeInBytes = 0) where A<:CuArray{<:CUDNNFloat}
   all(x -> x == 1, dilation) || error("Only dilation = 1 is supported in CuArrays")
-  cudnnConvolutionBackwardFilter(dw, x, w, dy, padding=pad, stride=stride, mode=mode, alpha=alpha)
+  cudnnConvolutionBackwardFilter(dw, x, w, dy, padding=pad, stride=stride, mode=mode, alpha=alpha,
+                                 workSpace=workSpace, workSpaceSizeInBytes=workSpaceSizeInBytes)
 end
 
 function ∇conv_data!(dx::A, dy::A, x::A, w::A;
                      pad = 0, stride = 1, mode = 0,
-                     alpha = 1, dilation = 1) where A<:CuArray{<:CUDNNFloat}
+                     alpha = 1, dilation = 1, workSpace = C_NULL,
+                     workSpaceSizeInBytes = 0) where A<:CuArray{<:CUDNNFloat}
   all(x -> x == 1, dilation) || error("Only dilation = 1 is supported in CuArrays")
-  cudnnConvolutionBackwardData(dx, x, w, dy, padding=pad, stride=stride, mode=mode, alpha=alpha)
+  cudnnConvolutionBackwardData(dx, x, w, dy, padding=pad, stride=stride, mode=mode, alpha=alpha,
+                               workSpace=workSpace, workSpaceSizeInBytes=workSpaceSizeInBytes)
 end
 
 
