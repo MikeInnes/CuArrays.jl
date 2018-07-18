@@ -2,7 +2,7 @@ using NNlib
 import NNlib: conv!, ∇conv_filter!, ∇conv_data!,
   maxpool!, meanpool!, ∇maxpool!, ∇meanpool!,
   softmax, softmax!, ∇softmax!, logsoftmax, logsoftmax!, ∇logsoftmax
-import ..CuArrays: CuVecOrMat, @cufunc, cufunc
+import ..CuArrays: CuVecOrMat, @cufunc, cufunc, CuVector
 using CUDAnative
 
 # Activation functions
@@ -59,30 +59,49 @@ end
 
 # Convolution
 
+const convworkspace = [CuVector{UInt8}(1)]
+
+getconvworkspace(bytes) =
+  length(convworkspace[]) ≥ bytes ?
+    convworkspace[] :
+    (convworkspace[] = CuVector{UInt8}(bytes))
+
 function conv!(y::A, x::A, w::A;
                pad = 0, stride = 1, mode = 0,
-               alpha = 1, dilation = 1, workspace::Union{CuVector, Nothing} = nothing,
-               workspaceSizeInBytes::Int = 0) where A<:CuArray{<:CUDNNFloat}
+               alpha = 1, dilation = 1, workspace = nothing,
+               workspaceSizeInBytes = 0, algo = 0) where A<:CuArray{<:CUDNNFloat}
   all(x -> x == 1, dilation) || error("Only dilation = 1 is supported in CuArrays")
-  cudnnConvolutionForward(y, x, w, padding=pad, stride=stride, mode=mode, alpha=alpha,
+  if workspace == nothing
+    workspaceSizeInBytes = cudnnGetConvolutionForwardWorkspaceSize(y, x, w, padding = pad, stride = stride, algo = algo, mode = mode)
+    workspace = workspaceSizeInBytes != 0 ? getconvworkspace(workspaceSizeInBytes) : workspace
+  end
+  cudnnConvolutionForward(y, x, w, padding=pad, stride=stride, mode=mode, alpha=alpha, algo = algo,
                           workSpace=workspace, workSpaceSizeInBytes=workspaceSizeInBytes)
 end
 
 function ∇conv_filter!(dw::A, dy::A, x::A, w::A;
                        pad = 0, stride = 1, mode = 0,
-                       alpha = 1, dilation = 1, workspace::Union{CuVector, Nothing} = nothing,
-                       workSpacesizeInBytes::Int = 0) where A<:CuArray{<:CUDNNFloat}
+                       alpha = 1, dilation = 1, workspace = nothing,
+                       workSpacesizeInBytes = 0, algo = 0) where A<:CuArray{<:CUDNNFloat}
   all(x -> x == 1, dilation) || error("Only dilation = 1 is supported in CuArrays")
-  cudnnConvolutionBackwardFilter(dw, x, w, dy, padding=pad, stride=stride, mode=mode, alpha=alpha,
+  if workspace == nothing
+    workspaceSizeInBytes = cudnnGetConvolutionBackwardFilterWorkspaceSize(dw, x, w, dy, padding = pad, stride = stride, algo = algo, mode = mode)
+    workspace = workspaceSizeInBytes != 0 ? getconvworkspace(workspaceSizeInBytes) : workspace
+  end
+  cudnnConvolutionBackwardFilter(dw, x, w, dy, padding=pad, stride=stride, mode=mode, alpha=alpha, algo = algo,
                                  workSpace=workspace, workSpaceSizeInBytes=workspaceSizeInBytes)
 end
 
 function ∇conv_data!(dx::A, dy::A, x::A, w::A;
                      pad = 0, stride = 1, mode = 0,
-                     alpha = 1, dilation = 1, workspace::Union{CuVector, Nothing} = nothing,
-                     workspaceSizeInBytes = 0) where A<:CuArray{<:CUDNNFloat}
+                     alpha = 1, dilation = 1, workspace = nothing,
+                     workspaceSizeInBytes = 0, algo = 0) where A<:CuArray{<:CUDNNFloat}
   all(x -> x == 1, dilation) || error("Only dilation = 1 is supported in CuArrays")
-  cudnnConvolutionBackwardData(dx, x, w, dy, padding=pad, stride=stride, mode=mode, alpha=alpha,
+  if workspace == nothing
+    workspaceSizeInBytes = cudnnGetConvolutionBackwardDataWorkspaceSize(dx, x, w, dy, padding = pad, stride = stride, algo = algo, mode = mode)
+    workspace = workspaceSizeInBytes != 0 ? getconvworkspace(workspaceSizeInBytes) : workspace
+  end
+  cudnnConvolutionBackwardData(dx, x, w, dy, padding=pad, stride=stride, mode=mode, alpha=alpha, algo = algo,
                                workSpace=workspace, workSpaceSizeInBytes=workspaceSizeInBytes)
 end
 
