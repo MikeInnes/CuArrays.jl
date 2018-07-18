@@ -61,29 +61,29 @@ end
 
 function conv!(y::A, x::A, w::A;
                pad = 0, stride = 1, mode = 0,
-               alpha = 1, dilation = 1, workSpace = C_NULL,
-               workSpaceSizeInBytes = 0) where A<:CuArray{<:CUDNNFloat}
+               alpha = 1, dilation = 1, workspace::Union{CuVector, Nothing} = nothing,
+               workspaceSizeInBytes::Int = 0) where A<:CuArray{<:CUDNNFloat}
   all(x -> x == 1, dilation) || error("Only dilation = 1 is supported in CuArrays")
   cudnnConvolutionForward(y, x, w, padding=pad, stride=stride, mode=mode, alpha=alpha,
-                          workSpace=workSpace, workSpaceSizeInBytes=workSpaceSizeInBytes)
+                          workSpace=workspace, workSpaceSizeInBytes=workspaceSizeInBytes)
 end
 
 function ∇conv_filter!(dw::A, dy::A, x::A, w::A;
                        pad = 0, stride = 1, mode = 0,
-                       alpha = 1, dilation = 1, workSpace = C_NULL,
-                       workSpaceSizeInBytes = 0) where A<:CuArray{<:CUDNNFloat}
+                       alpha = 1, dilation = 1, workspace::Union{CuVector, Nothing} = nothing,
+                       workSpacesizeInBytes::Int = 0) where A<:CuArray{<:CUDNNFloat}
   all(x -> x == 1, dilation) || error("Only dilation = 1 is supported in CuArrays")
   cudnnConvolutionBackwardFilter(dw, x, w, dy, padding=pad, stride=stride, mode=mode, alpha=alpha,
-                                 workSpace=workSpace, workSpaceSizeInBytes=workSpaceSizeInBytes)
+                                 workSpace=workspace, workSpaceSizeInBytes=workspaceSizeInBytes)
 end
 
 function ∇conv_data!(dx::A, dy::A, x::A, w::A;
                      pad = 0, stride = 1, mode = 0,
-                     alpha = 1, dilation = 1, workSpace = C_NULL,
-                     workSpaceSizeInBytes = 0) where A<:CuArray{<:CUDNNFloat}
+                     alpha = 1, dilation = 1, workspace::Union{CuVector, Nothing} = nothing,
+                     workspaceSizeInBytes = 0) where A<:CuArray{<:CUDNNFloat}
   all(x -> x == 1, dilation) || error("Only dilation = 1 is supported in CuArrays")
   cudnnConvolutionBackwardData(dx, x, w, dy, padding=pad, stride=stride, mode=mode, alpha=alpha,
-                               workSpace=workSpace, workSpaceSizeInBytes=workSpaceSizeInBytes)
+                               workSpace=workspace, workSpaceSizeInBytes=workspaceSizeInBytes)
 end
 
 
