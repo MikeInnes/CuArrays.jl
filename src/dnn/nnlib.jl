@@ -2,7 +2,7 @@ using NNlib
 import NNlib: conv!, ∇conv_filter!, ∇conv_data!,
   maxpool!, meanpool!, ∇maxpool!, ∇meanpool!,
   softmax, softmax!, ∇softmax!, logsoftmax, logsoftmax!, ∇logsoftmax
-import ..CuArrays: CuVecOrMat, @cufunc
+import ..CuArrays: CuVecOrMat, @cufunc, cufunc
 using CUDAnative
 
 # Activation functions
@@ -18,7 +18,7 @@ end
   ifelse(x ≥ 0, x/1, α * (exp(x) - one(x)))
 
 # TODO: make @cufunc recognise its own definitions
-# cufunc(::typeof(swish)) = x -> x * cufunc(σ)(x)
+cufunc(::typeof(swish)) = x -> x * cufunc(σ)(x)
 
 @cufunc function selu(x)
   λ = oftype(x/1, 1.0507009873554804934193349852946)

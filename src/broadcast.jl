@@ -17,6 +17,11 @@ cudaconvert(r::Ref) = CuRefValue(cudaconvert(r[]))
 
 # Until we can use Cassette to do this translation for use we **try** to do some manually fixing
 
+cufunc(f) = f
+
+@inline preprocess(dest::CuArray, bc::Broadcasted{Nothing}) =
+  Broadcasted{Nothing}(cufunc(bc.f), preprocess_args(dest, bc.args), bc.axes)
+
 libdevice = :[
   cos, cospi, sin, sinpi, tan, acos, asin, atan,
   cosh, sinh, tanh, acosh, asinh, atanh,
@@ -35,12 +40,9 @@ libdevice = :[
 
 for f in libdevice
   isdefined(Base, f) || continue
-  @eval begin
-    @inline preprocess(dest::CuArray, bc::Broadcasted{Nothing,<:Any,typeof(Base.$f)}) = Broadcasted{Nothing}(CUDAnative.$f, preprocess_args(dest, bc.args), bc.axes)
-  end
+  @eval cufunc(::typeof(Base.$f)) = CUDAnative.$f
 end
 
-# ForwardDiff Integration
 using MacroTools
 
 function replace_device(ex)
@@ -56,12 +58,11 @@ macro cufunc(ex)
   def[:body] = replace_device(def[:body])
   quote
     $(esc(MacroTools.combinedef(def)))
-    @inline function Base.Broadcast.preprocess(dest::CuArrays.CuArray, bc::Base.Broadcast.Broadcasted{Nothing,<:Any,typeof($(esc(f)))})
-      Base.Broadcast.Broadcasted{Nothing}($(esc(def[:name])), Base.Broadcast.preprocess_args(dest, bc.args), bc.axes)
-    end
+    CuArrays.cufunc(::typeof($(esc(f)))) = $(esc(def[:name]))
   end
 end
 
+# ForwardDiff Integration
 using ForwardDiff: Dual, value, partials, unary_dual_definition
 using DiffRules
 
