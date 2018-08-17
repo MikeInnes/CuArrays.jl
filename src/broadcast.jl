@@ -16,10 +16,6 @@ Base.getindex(r::CuRefValue) = r.x
 cudaconvert(r::Ref) = CuRefValue(cudaconvert(r[]))
 
 # Until we can use Cassette to do this translation for use we **try** to do some manually fixing
-import NNlib: @fix, _cufunc
-
-_cufunc(f,x::CuArray,xs...) = cufunc(f)
-cufunc(x) = x
 
 libdevice = :[
   cos, cospi, sin, sinpi, tan, acos, asin, atan,
@@ -40,7 +36,6 @@ libdevice = :[
 for f in libdevice
   isdefined(Base, f) || continue
   @eval begin
-    cufunc(::typeof(Base.$f)) = CUDAnative.$f
     @inline preprocess(dest::CuArray, bc::Broadcasted{Nothing,<:Any,typeof(Base.$f)}) = Broadcasted{Nothing}(CUDAnative.$f, preprocess_args(dest, bc.args), bc.axes)
   end
 end
@@ -64,7 +59,6 @@ macro cufunc(ex)
     @inline function Base.Broadcast.preprocess(dest::CuArrays.CuArray, bc::Base.Broadcast.Broadcasted{Nothing,<:Any,typeof($(esc(f)))})
       Base.Broadcast.Broadcasted{Nothing}($(esc(def[:name])), Base.Broadcast.preprocess_args(dest, bc.args), bc.axes)
     end
-    CuArrays.cufunc(::typeof($(esc(f)))) = $(esc(def[:name]))
   end
 end
 
