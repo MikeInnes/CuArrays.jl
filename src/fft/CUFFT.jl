@@ -5,8 +5,11 @@ using ..CuArrays: libcufft, configured, CuArray
 import AbstractFFTs: plan_fft, plan_fft!, plan_bfft, plan_bfft!,
     plan_rfft, plan_brfft, plan_inv, normalization, fft, bfft, ifft, rfft,
     Plan, ScaledPlan
-import Base: show, *, convert, unsafe_convert, size, strides, ndims, A_mul_B!
+import Base: show, *, convert, unsafe_convert, size, strides, ndims
+import LinearAlgebra: mul!
 import Base.Sys: WORD_SIZE
+
+using LinearAlgebra
 
 include("libcufft_types.jl")
 include("error.jl")
@@ -40,7 +43,7 @@ mutable struct cCuFFTPlan{T<:cufftNumber,K,inplace,N} <: CuFFTPlan{T,K,inplace}
                                        ) where {T<:cufftNumber,K,inplace,N}
         # maybe enforce consistency of sizey
         p = new(plan, size(X), sizey, xtype, region)
-        finalizer(p, destroy_plan)
+        finalizer(destroy_plan, p)
         p
     end
 end
@@ -60,7 +63,7 @@ mutable struct rCuFFTPlan{T<:cufftNumber,K,inplace,N} <: CuFFTPlan{T,K,inplace}
                                        ) where {T<:cufftNumber,K,inplace,N}
         # maybe enforce consistency of sizey
         p = new(plan, size(X), sizey, xtype, region)
-        finalizer(p, destroy_plan)
+        finalizer(destroy_plan, p)
         p
     end
 end
@@ -117,7 +120,7 @@ function _mkplan(xtype, xdims, region)
 
     else
         rsz = (length(sz) > 1) ? rsz = reverse(sz) : sz
-        if ((region...) == ((1:nrank)...))
+        if ((region...,) == ((1:nrank)...,))
             # handle simple case ... simply! (for robustness)
             @check ccall((:cufftPlanMany,libcufft),cufftStatus_t,
                          (Ptr{cufftHandle_t}, Cint, Ptr{Cint}, # rank, dims
@@ -235,7 +238,7 @@ unsafe_convert(::Type{cufftHandle_t}, p::CuFFTPlan) = p.plan
 convert(::Type{cufftHandle_t}, p::CuFFTPlan) = p.plan
 
 destroy_plan(plan::CuFFTPlan) =
-    ccall((:cufftDestroy,libcufft), Void, (cufftHandle_t,), plan.plan)
+    ccall((:cufftDestroy,libcufft), Nothing, (cufftHandle_t,), plan.plan)
 
 function assert_applicable(p::CuFFTPlan{T,K}, X::CuArray{T}) where {T,K}
     (size(X) == p.sz) ||
@@ -404,7 +407,7 @@ function plan_rfft(X::CuArray{T,N}, region) where {T<:cufftReals,N}
     ydims = collect(size(X))
     ydims[region[1]] = div(ydims[region[1]],2)+1
 
-    rCuFFTPlan{T,K,inplace,N}(pp, X, (ydims...), region, xtype)
+    rCuFFTPlan{T,K,inplace,N}(pp, X, (ydims...,), region, xtype)
 end
 
 function plan_brfft(X::CuArray{T,N}, d::Integer, region::Any) where {T<:cufftComplexes,N}
@@ -414,9 +417,9 @@ function plan_brfft(X::CuArray{T,N}, d::Integer, region::Any) where {T<:cufftCom
     ydims = collect(size(X))
     ydims[region[1]] = d
 
-    pp = _mkplan(xtype, (ydims...), region)
+    pp = _mkplan(xtype, (ydims...,), region)
 
-    rCuFFTPlan{T,K,inplace,N}(pp, X, (ydims...), region, xtype)
+    rCuFFTPlan{T,K,inplace,N}(pp, X, (ydims...,), region, xtype)
 end
 
 # FIXME: plan_inv methods allocate needlessly (to provide type parameters)
@@ -465,7 +468,7 @@ end
 
 size(p::CuFFTPlan) = p.sz
 
-function A_mul_B!(y::CuArray{Ty}, p::CuFFTPlan{T,K,false}, x::CuArray{T}
+function mul!(y::CuArray{Ty}, p::CuFFTPlan{T,K,false}, x::CuArray{T}
                   ) where {Ty,T,K}
     assert_applicable(p,x,y)
     unsafe_execute!(p,x,y)
@@ -482,7 +485,7 @@ function *(p::rCuFFTPlan{T,CUFFT_FORWARD,false,N}, x::CuArray{T,N}
            ) where {T<:cufftReals,N}
     @assert p.xtype ∈ [CUFFT_R2C,CUFFT_D2Z]
     y = CuArray{complex(T),N}(p.osz)
-    A_mul_B!(y,p,x)
+    mul!(y,p,x)
     y
 end
 
@@ -490,13 +493,13 @@ function *(p::rCuFFTPlan{T,CUFFT_INVERSE,false,N}, x::CuArray{T,N}
            ) where {T<:cufftComplexes,N}
     @assert p.xtype ∈ [CUFFT_C2R,CUFFT_Z2D]
     y = CuArray{real(T),N}(p.osz)
-    A_mul_B!(y,p,x)
+    mul!(y,p,x)
     y
 end
 
 function *(p::cCuFFTPlan{T,K,false,N}, x::CuArray{T,N}) where {T,K,N}
     y = CuArray{T,N}(p.osz)
-    A_mul_B!(y,p,x)
+    mul!(y,p,x)
     y
 end
 

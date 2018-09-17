@@ -1,15 +1,14 @@
-using GPUArrays
-
 import CUDAnative: DevicePtr
 
 mutable struct CuArray{T,N} <: GPUArray{T,N}
   buf::Mem.Buffer
   offset::Int
   dims::NTuple{N,Int}
+
   function CuArray{T,N}(buf::Mem.Buffer, offset::Integer, dims::NTuple{N,Integer}) where {T,N}
     xs = new{T,N}(buf, offset, dims)
     Mem.retain(buf)
-    finalizer(xs, unsafe_free!)
+    finalizer(unsafe_free!, xs)
     return xs
   end
 end
@@ -20,27 +19,45 @@ CuVector{T} = CuArray{T,1}
 CuMatrix{T} = CuArray{T,2}
 CuVecOrMat{T} = Union{CuVector{T},CuMatrix{T}}
 
+Base.elsize(::CuArray{T}) where T = sizeof(T)
+
 function unsafe_free!(xs::CuArray)
   Mem.release(xs.buf) && dealloc(xs.buf, prod(xs.dims)*sizeof(eltype(xs)))
   return
 end
 
-unsafe_buffer(xs::CuArray) =
-  Mem.Buffer(xs.buf.ptr+xs.offset, sizeof(xs), xs.buf.ctx)
+"""
+  buffer(array::CuArray [, index])
 
-Base.cconvert(::Type{Ptr{T}}, x::CuArray{T}) where T = unsafe_buffer(x)
-Base.cconvert(::Type{Ptr{Void}}, x::CuArray) = unsafe_buffer(x)
+Get the native address of a CuArray, optionally at a given location `index`.
+Equivalent of `Base.pointer` on `Array`s.
+"""
+function buffer(xs::CuArray, index=1)
+  extra_offset = (index-1) * Base.elsize(xs)
+  Mem.Buffer(xs.buf.ptr + xs.offset + extra_offset,
+             sizeof(xs) - extra_offset,
+             xs.buf.ctx)
+end
+
+Base.cconvert(::Type{Ptr{T}}, x::CuArray{T}) where T = buffer(x)
+Base.cconvert(::Type{Ptr{Nothing}}, x::CuArray) = buffer(x)
 
 CuArray{T,N}(dims::NTuple{N,Integer}) where {T,N} =
   CuArray{T,N}(alloc(prod(dims)*sizeof(T)), dims)
+# This constructor is to avoid ambiguity with constructor in GPUArrays
+CuArray{T,0}(::Tuple{}) where T = CuArray{T,0}(alloc(sizeof(T)), ())
 
 CuArray{T}(dims::NTuple{N,Integer}) where {T,N} =
   CuArray{T,N}(dims)
+# This constructor is to avoid ambiguity with constructor in GPUArrays
+CuArray{T}(::Tuple{}) where T = CuArray{T,0}()
 
 CuArray(dims::NTuple{N,Integer}) where N = CuArray{Float32,N}(dims)
 
 (T::Type{<:CuArray})(dims::Integer...) = T(dims)
 
+Base.similar(a::CuArray{T,N}) where {T,N} = CuArray{T,N}(size(a))
+Base.similar(a::CuArray{T}, dims::Base.Dims{N}) where {T,N} = CuArray{T,N}(dims)
 Base.similar(a::CuArray, ::Type{T}, dims::Base.Dims{N}) where {T,N} =
   CuArray{T,N}(dims)
 
@@ -48,35 +65,31 @@ Base.size(x::CuArray) = x.dims
 Base.sizeof(x::CuArray) = Base.elsize(x) * length(x)
 
 function Base._reshape(parent::CuArray, dims::Dims)
-  n = Base._length(parent)
+  n = length(parent)
   prod(dims) == n || throw(DimensionMismatch("parent has $n elements, which is incompatible with size $dims"))
   return CuArray{eltype(parent),length(dims)}(parent.buf, parent.offset, dims)
 end
 
 # Interop with CPU array
 
-function Base.copy!(dst::CuArray{T}, src::Array{T}) where T
-    @assert length(dst) == length(src)
-    Mem.upload!(unsafe_buffer(dst), src)
-    return dst
+function Base.unsafe_copyto!(dest::CuArray{T}, doffs, src::Array{T}, soffs, n) where T
+    Mem.upload!(buffer(dest, doffs), pointer(src, soffs), n*sizeof(T))
+    return dest
 end
 
-function Base.copy!(dst::Array{T}, src::CuArray{T}) where T
-    @assert length(dst) == length(src)
-    Mem.download!(dst, unsafe_buffer(src))
-    return dst
+function Base.unsafe_copyto!(dest::Array{T}, doffs, src::CuArray{T}, soffs, n) where T
+    Mem.download!(pointer(dest, doffs), buffer(src, soffs), n*sizeof(T))
+    return dest
 end
 
-function Base.copy!(dst::CuArray{T}, src::CuArray{T}) where T
-    @assert length(dst) == length(src)
-    Mem.transfer!(unsafe_buffer(dst), unsafe_buffer(src), sizeof(src))
-    return dst
+function Base.unsafe_copyto!(dest::CuArray{T}, doffs, src::CuArray{T}, soffs, n) where T
+    Mem.transfer!(buffer(dest, doffs), buffer(src, soffs), n*sizeof(T))
+    return dest
 end
 
-Base.collect(x::CuArray{T,N}) where {T,N} =
-  copy!(Array{T,N}(size(x)), x)
+Base.collect(x::CuArray{T,N}) where {T,N} = copyto!(Array{T,N}(undef, size(x)), x)
 
-function Base.deepcopy_internal(x::CuArray, dict::ObjectIdDict)
+function Base.deepcopy_internal(x::CuArray, dict::IdDict)
   haskey(dict, x) && return dict[x]::typeof(x)
   return dict[x] = copy(x)
 end
@@ -84,10 +97,10 @@ end
 Base.convert(::Type{T}, x::T) where T <: CuArray = x
 
 Base.convert(::Type{CuArray{T,N}}, xs::Array{T,N}) where {T,N} =
-  copy!(CuArray{T,N}(size(xs)), xs)
+  copyto!(CuArray{T,N}(size(xs)), xs)
 
 Base.convert(::Type{CuArray{T}}, xs::Array{T,N}) where {T,N} =
-  copy!(CuArray{T}(size(xs)), xs)
+  copyto!(CuArray{T}(size(xs)), xs)
 
 Base.convert(::Type{CuArray}, xs::Array{T,N}) where {T,N} =
   convert(CuArray{T,N}, xs)
@@ -130,19 +143,9 @@ cuones(T::Type, dims...) = fill!(CuArray{T}(dims...), 1)
 cuzeros(dims...) = cuzeros(Float32, dims...)
 cuones(dims...) = cuones(Float32, dims...)
 
-Base.show(io::IO, ::Type{CuArray{T,N}}) where {T,N} =
-  print(io, "CuArray{$T,$N}")
-
-function Base.showarray(io::IO, X::CuArray, repr::Bool = true; header = true)
-  if repr
-    print(io, "CuArray(")
-    Base.showarray(io, collect(X), true)
-    print(io, ")")
-  else
-    header && println(io, summary(X), ":")
-    Base.showarray(io, collect(X), false, header = false)
-  end
-end
+Base.print_array(io::IO, x::CuArray) = Base.print_array(io, collect(x))
+Base.print_array(io::IO, x::LinearAlgebra.Adjoint{<:Any,<:CuArray}) = Base.print_array(io, LinearAlgebra.adjoint(collect(x.parent)))
+Base.print_array(io::IO, x::LinearAlgebra.Transpose{<:Any,<:CuArray}) = Base.print_array(io, LinearAlgebra.transpose(collect(x.parent)))
 
 import Adapt: adapt, adapt_
 
@@ -157,3 +160,42 @@ adapt_(::Type{<:Array}, xs::CuArray) = collect(xs)
 cu(xs) = adapt(CuArray{Float32}, xs)
 
 Base.getindex(::typeof(cu), xs...) = CuArray([xs...])
+
+
+# Generic linear algebra routines
+
+function LinearAlgebra.tril!(A::CuMatrix{T}, d::Integer = 0) where T
+    function kernel!(_A, _d)
+        li = (blockIdx().x - 1) * blockDim().x + threadIdx().x
+        m, n = size(_A)
+        if 0 < li <= m*n
+            i, j = Tuple(CartesianIndices(_A)[li])
+            if i < j - _d
+                _A[i, j] = 0
+            end
+        end
+        return nothing
+    end
+
+    blk, thr = cudims(A)
+    @cuda blocks=blk threads=thr kernel!(A, d)
+    return A
+end
+
+function LinearAlgebra.triu!(A::CuMatrix{T}, d::Integer = 0) where T
+    function kernel!(_A, _d)
+        li = (blockIdx().x - 1) * blockDim().x + threadIdx().x
+        m, n = size(_A)
+        if 0 < li <= m*n
+            i, j = Tuple(CartesianIndices(_A)[li])
+            if j < i + _d
+                _A[i, j] = 0
+            end
+        end
+        return nothing
+    end
+
+    blk, thr = cudims(A)
+    @cuda blocks=blk threads=thr kernel!(A, d)
+    return A
+end

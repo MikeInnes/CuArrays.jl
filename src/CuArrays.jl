@@ -5,7 +5,11 @@ module CuArrays
 using CUDAdrv, CUDAnative
 import CUDAnative: cudaconvert
 
+using GPUArrays
+
 export CuArray, CuVector, CuMatrix, CuVecOrMat, cu, cuzeros, cuones
+
+import LinearAlgebra
 
 const ext = joinpath(dirname(@__DIR__), "deps", "ext.jl")
 isfile(ext) || error("CuArrays.jl has not been built, please run Pkg.build(\"CuArrays\").")
@@ -24,6 +28,8 @@ include("array.jl")
 include("utils.jl")
 include("indexing.jl")
 include("broadcast.jl")
+include("matmul.jl")
+include("mapreduce.jl")
 
 include("blas/CUBLAS.jl")
 include("solver/CUSOLVER.jl")
@@ -38,8 +44,8 @@ end
 
 function __init__()
     if !configured
-        warn("CuArrays.jl has not been successfully built, and will not work properly.")
-        warn("Please run Pkg.build(\"CuArrays\") and restart Julia.")
+        @warn("CuArrays.jl has not been successfully built, and will not work properly.")
+        @warn("Please run Pkg.build(\"CuArrays\") and restart Julia.")
         return
     end
 
