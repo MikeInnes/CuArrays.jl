@@ -14,7 +14,7 @@ complexfloat(x::CuArray{T}) where {T<:Real} = copy1(typeof(complex(cufftfloat(ze
 realfloat(x::CuArray{T}) where {T<:Real} = copy1(typeof(cufftfloat(zero(T))), x)
 
 function copy1(::Type{T}, x) where T
-    y = CuArray{T}(map(length, indices(x)))
+    y = CuArray{T}(map(length, axes(x)))
     #copy!(y, x)
     y .= broadcast(xi->convert(T,xi),x)
 end
@@ -34,4 +34,4 @@ rfft(x::CuArray{<:Union{Integer,Rational}}, region=1:ndims(x)) = rfft(realfloat(
 plan_rfft(x::CuArray{<:Real}, region) = plan_rfft(realfloat(x), region)
 
 *(p::Plan{T}, x::CuArray) where {T} = p * copy1(T, x)
-*(p::ScaledPlan, x::CuArray) = scale!(p.p * x, p.scale)
+*(p::ScaledPlan, x::CuArray) = rmul!(p.p * x, p.scale)
