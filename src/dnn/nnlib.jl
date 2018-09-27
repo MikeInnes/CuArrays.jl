@@ -75,7 +75,9 @@ end
 function conv!(y::CuArray{T}, x::CuArray{T}, w::CuArray{T};
                pad=0, stride=1, mode=0, alpha=1, dilation=1,
                workspace::Union{CuVector, Nothing}=nothing, algo=0) where T<:CUDNNFloat
-  all(x -> x == 1, dilation) || error("Only dilation = 1 is supported in CuArrays")
+  if CUDNN_VERSION < 6000
+    all(x -> x == 1, dilation) || error("Only dilation = 1 is supported in cuDNN version < 6")
+  end
   if workspace === nothing
     workspace_size =
       cudnnGetConvolutionForwardWorkspaceSize(y, x, w, padding=pad, stride=stride,
