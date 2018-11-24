@@ -115,6 +115,7 @@ end
     @test typeof(view(x, :, 1, 1:3)) <: SubArray
     @test typeof(view(x, :, 1:2:4, 1)) <: SubArray
     @test typeof(view(x, 1:2:5, 1, 1)) <: SubArray
+    @test typeof(view(x, 2:4, 4, [3,1,2])) <: SubArray
   end
 end
 
@@ -132,4 +133,13 @@ end
   end
   @test t >= 0
   @test ret == 42
+end
+
+@testset "isapprox-complex" begin
+    ca = CuArray(randn(ComplexF64,3,3))
+    cb = copy(ca)
+    #@test ca ≈ cb still errors!
+    cb[1:1, 1:1] .+= 1e-7im
+    @test isapprox(ca, cb, atol=1e-5)
+    @test !isapprox(ca, cb, atol=1e-9)
 end
