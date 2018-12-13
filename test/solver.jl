@@ -204,7 +204,7 @@ k = 1
         h_V            = collect(d_V)
         Eig            = eigfact(A)
         @test Eig[:vals] ≈ h_W
-        @test Eig[:vecs] ≈ h_V
+        @test abs.(Eig[:vecs]'*h_V) ≈ I
     end
 
     @testset "svd!" begin
