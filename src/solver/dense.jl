@@ -381,8 +381,8 @@ end
 
 for (jname, bname, fname, elty, relty) in ((:syevd!, :cusolverDnSsyevd_bufferSize, :cusolverDnSsyevd, :Float32, :Float32),
                                            (:syevd!, :cusolverDnDsyevd_bufferSize, :cusolverDnDsyevd, :Float64, :Float64),
-                                           (:heevd!, :cusolverDnCheevd_bufferSize, :cusolverDnCheevd, :Complex64, :Float32),
-                                           (:heevd!, :cusolverDnZheevd_bufferSize, :cusolverDnZheevd, :Complex128, :Float64))
+                                           (:heevd!, :cusolverDnCheevd_bufferSize, :cusolverDnCheevd, :ComplexF32, :Float32),
+                                           (:heevd!, :cusolverDnZheevd_bufferSize, :cusolverDnZheevd, :ComplexF64, :Float64))
     @eval begin
         function $jname(jobz::Char,
                         uplo::Char,
@@ -420,8 +420,8 @@ end
 
 for (jname, bname, fname, elty, relty) in ((:sygvd!, :cusolverDnSsygvd_bufferSize, :cusolverDnSsygvd, :Float32, :Float32),
                                            (:sygvd!, :cusolverDnDsygvd_bufferSize, :cusolverDnDsygvd, :Float64, :Float64),
-                                           (:hegvd!, :cusolverDnChegvd_bufferSize, :cusolverDnChegvd, :Complex64, :Float32),
-                                           (:hegvd!, :cusolverDnZhegvd_bufferSize, :cusolverDnZhegvd, :Complex128, :Float64))
+                                           (:hegvd!, :cusolverDnChegvd_bufferSize, :cusolverDnChegvd, :ComplexF32, :Float32),
+                                           (:hegvd!, :cusolverDnZhegvd_bufferSize, :cusolverDnZhegvd, :ComplexF64, :Float64))
     @eval begin
         function $jname(itype::Int,
                         jobz::Char,
