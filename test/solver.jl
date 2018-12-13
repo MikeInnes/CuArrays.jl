@@ -202,9 +202,9 @@ k = 1
         end
         h_W            = collect(d_W)
         h_V            = collect(d_V)
-        Eig            = eigfact(A)
-        @test Eig[:vals] ≈ h_W
-        @test abs.(Eig[:vecs]'*h_V) ≈ I
+        Eig            = eigen(A)
+        @test Eig.values ≈ h_W
+        @test abs.(Eig.vectors'*h_V) ≈ I
     end
 
     @testset "svd!" begin
