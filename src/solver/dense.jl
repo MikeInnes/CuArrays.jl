@@ -388,7 +388,7 @@ for (jname, bname, fname, elty, relty) in ((:syevd!, :cusolverDnSsyevd_bufferSiz
                         uplo::Char,
                         A::CuMatrix{$elty})
             cuuplo  = cublasfill(uplo)
-            cujobz  = cusolverjob(uplo)
+            cujobz  = cusolverjob(jobz)
             n       = checksquare(A)
             lda     = max(1, stride(A, 2))
             W       = CuArray{$relty}(undef, n)
@@ -429,7 +429,7 @@ for (jname, bname, fname, elty, relty) in ((:sygvd!, :cusolverDnSsygvd_bufferSiz
                         A::CuMatrix{$elty},
                         B::CuMatrix{$elty})
             cuuplo  = cublasfill(uplo)
-            cujobz  = cusolverjob(uplo)
+            cujobz  = cusolverjob(jobz)
             nA, nB  = checksquare(A, B)
             if nB != nA
                 throw(DimensionMismatch("Dimensions of A ($nA, $nA) and B ($nB, $nB) must match!"))
