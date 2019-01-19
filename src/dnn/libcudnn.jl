@@ -221,6 +221,7 @@ function cudnnSoftmaxBackward(src::CuArray{T,4}, srcDiff::CuArray{T,4}, destDiff
 end
 
 function cudnnConvolutionBiasActivationForward(alpha1, xDesc, x, wDesc, w, convDesc, algo, workspace, workspace_size, alpha2, biasDesc, bias, activationDesc, yDesc, y)
+    workspace = something(workspace, C_NULL)
     @check ccall((:cudnnConvolutionBiasActivationForward, libcudnn),
                 cudnnStatus_t,
                 (cudnnHandle_t, Ptr{Nothing}, cudnnTensorDescriptor_t, Ptr{Nothing},
