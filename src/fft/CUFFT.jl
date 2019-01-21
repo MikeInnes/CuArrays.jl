@@ -14,6 +14,11 @@ import Base.Sys: WORD_SIZE
 using LinearAlgebra
 import LinearAlgebra: mul!
 
+import CUDAdrv
+
+export destroy_plan
+export cufft_setstream
+
 include("libcufft_types.jl")
 include("error.jl")
 
