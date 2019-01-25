@@ -143,7 +143,7 @@ destroy_plan(plan::CuFFTPlan) =
     ccall((:cufftDestroy,libcufft), Nothing, (cufftHandle_t,), plan.plan)
 
 cufft_setstream(plan::CuFFTPlan, stream::CUDAdrv.CuStream) =
-    ccall((:cufftSetStream,libcufft), Nothing, (cufftHandle_t,CUDAdrv.CuStream_t), plan.plan, stream)
+    ccall((:cufftSetStream,libcufft), Nothing, (cufftHandle_t, CUDAdrv.CuStream_t), plan.plan, stream)
 
 function assert_applicable(p::CuFFTPlan{T,K}, X::CuArray{T}) where {T,K}
     (size(X) == p.sz) ||
