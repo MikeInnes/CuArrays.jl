@@ -205,7 +205,7 @@ end
 
 ## utilities
 
-cu(xs) = adapt(CuArray{Float32}, xs)
+cu(xs) = adapt(CuArray{eltype(xs)}, xs)
 Base.getindex(::typeof(cu), xs...) = CuArray([xs...])
 
 cuzeros(T::Type, dims...) = fill!(CuArray{T}(undef, dims...), 0)
