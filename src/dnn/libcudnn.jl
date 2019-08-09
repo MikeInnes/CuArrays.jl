@@ -134,7 +134,7 @@ function cudnnSetConvolutionGroupCount(convDesc,groupCount)
 end
 
 function cudnnGetConvolutionGroupCount(convDesc,groupCount)
-    @check ccall((:cudnnSetConvolutionGroupCount,libcudnn),
+    @check ccall((:cudnnGetConvolutionGroupCount,libcudnn),
                  cudnnStatus_t,
                  (cudnnConvolutionDescriptor_t,Ptr{Cint}),
                  convDesc,groupCount)
