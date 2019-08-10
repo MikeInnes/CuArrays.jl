@@ -352,7 +352,6 @@ function Base.reverse!(input::CuArray{T, N}, output::CuArray{T, N}; dims::Intege
 
     numelemsinprevdims = prod(shape[1:dims-1])
     numelemsincurrdim = shape[dims]
-    numelemsinafterdims = prod(shape[1:dims-1])
 
     function kernel(input::CuDeviceArray{T, N}, output::CuDeviceArray{T, N}) where {T, N}
         shared = @cuDynamicSharedMem(T, blockDim().x)
@@ -374,7 +373,7 @@ function Base.reverse!(input::CuArray{T, N}, output::CuArray{T, N}; dims::Intege
         # to find the location of the original element in 1D representation of the
         # flipped array. ik is the index of an element in the original array along
         # dimension that we will flip.
-        ik = ((UInt32(ceil(index_in / numelemsinafterdims)) - 1) % numelemsincurrdim) + 1
+        ik = ((UInt32(ceil(index_in / numelemsinprevdims)) - 1) % numelemsincurrdim) + 1
         index_out = UInt32(index_in + (numelemsincurrdim - 2ik + 1) * numelemsinprevdims)
 
         if 1 ≤ index_out ≤ length(output)
