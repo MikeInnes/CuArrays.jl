@@ -353,14 +353,11 @@ reverse_testset = [
         a_d = cu(a)
         b_d = similar(a_d)
 
-        @testcase "$testshape" begin
-          for dims=1:length(testshape)
-            b_h = reverse(a_h, dims=dims)
-            reverse!(a_d, b_d, dims=dims)
-            @test all(cu(b_h) .== b_d)
-          end
+        for dims=1:length(testshape)
+          b_h = reverse(a_h, dims=dims)
+          reverse!(a_d, b_d, dims=dims)
+          @test all(cu(b_h) .== b_d)
         end
-
     end
 end
 

@@ -346,7 +346,6 @@ function Base.reverse!(input::CuArray{T, N}, output::CuArray{T, N}; dims::Intege
 
     nthreads = 256
     nblocks = ceil(Int, length(input)/nthreads)
-    shmem = nthreads * sizeof(T)
 
     shape = [size(input)...]
 
@@ -354,35 +353,24 @@ function Base.reverse!(input::CuArray{T, N}, output::CuArray{T, N}; dims::Intege
     numelemsincurrdim = shape[dims]
 
     function kernel(input::CuDeviceArray{T, N}, output::CuDeviceArray{T, N}) where {T, N}
-        shared = @cuDynamicSharedMem(T, blockDim().x)
+      # The plan is to treat an ND Array as a 1D Array. An element at pos
+          # [i1, i2, i3, ... , i{x}, ..., i{n}], after reversing about the xth
+          # dimension, will be at [i1, i2, i3, ... , d{x} - i{x} + 1, ..., i{n}],
+          # where d_{x} is the size of the xth dimension. We use this information
+          # to find the location of the original element in 1D representation of the
+          # flipped array. ik is the index of an element in the original array along
+          # dimension that we will flip.
+          offset_in = blockDim().x * (blockIdx().x - 1)
+          index_in = offset_in + threadIdx().x
+          ik = ((UInt32(ceil(index_in / numelemsinprevdims)) - 1) % numelemsincurrdim) + 1
+          index_out = UInt32(index_in + (numelemsincurrdim - 2ik + 1) * numelemsinprevdims)
 
-        offset_in = blockDim().x * (blockIdx().x - 1)
-        index_in = offset_in + threadIdx().x
-
-        if 1 ≤ index_in ≤ length(input)
-            index_shared = threadIdx().x
-            @inbounds shared[index_shared] = input[index_in]
-        end
-
-        sync_threads()
-
-        # The plan is to treat an ND Array as a 1D Array. An element at pos
-        # [i1, i2, i3, ... , i{x}, ..., i{n}], after reversing about the xth
-        # dimension, will be at [i1, i2, i3, ... , d{x} - i{x} + 1, ..., i{n}],
-        # where d_{x} is the size of the xth dimension. We use this information
-        # to find the location of the original element in 1D representation of the
-        # flipped array. ik is the index of an element in the original array along
-        # dimension that we will flip.
-        ik = ((UInt32(ceil(index_in / numelemsinprevdims)) - 1) % numelemsincurrdim) + 1
-        index_out = UInt32(index_in + (numelemsincurrdim - 2ik + 1) * numelemsinprevdims)
-
-        if 1 ≤ index_out ≤ length(output)
-            index_shared = threadIdx().x
-            @inbounds output[index_out] = shared[index_shared]
-        end
-        return
+          if 1 ≤ index_in ≤ length(input) && 1 ≤ index_out ≤ length(output)
+              @inbounds output[index_out] = input[index_in]
+          end
+          return
     end
-    @cuda threads=nthreads blocks=nblocks shmem=shmem kernel(input, output)
+    @cuda threads=nthreads blocks=nblocks kernel(input, output)
 end
 
 function Base.reverse(input::CuArray{T, N}; dims::Integer) where {T, N}
