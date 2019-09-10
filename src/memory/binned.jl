@@ -1,7 +1,7 @@
 module BinnedPool
 
 import Base.GC: gc
-import ..CuArrays, ..alloc_stats, ..@alloc_time
+import ..CuArrays, ..alloc_stats, ..@alloc_time, ..actual_alloc, ..actual_free
 
 using CUDAdrv
 
@@ -24,9 +24,6 @@ using CUDAdrv
 # - per-device pools
 
 const pool_lock = ReentrantLock()
-
-const usage = Ref(0)
-const usage_limit = Ref{Union{Nothing,Int}}(nothing)
 
 
 ## tunables
@@ -180,38 +177,14 @@ end
 
 ## allocator state machine
 
-function try_cuda_alloc(bytes)
-  # check the memory allocation limit
-  if usage_limit[] !== nothing
-    if usage[] + bytes > usage_limit[]
-      return
-    end
-  end
-
-  # try the actual allocation
-  try
-    alloc_stats.cuda_time += Base.@elapsed begin
-      buf = Mem.alloc(Mem.Device, bytes)
-      usage[] += bytes
-    end
-    alloc_stats.actual_nalloc += 1
-    alloc_stats.actual_alloc += bytes
-    return buf
-  catch ex
-    ex == CUDAdrv.ERROR_OUT_OF_MEMORY || rethrow()
-  end
-
-  return
-end
-
-function try_alloc(bytes, pid=-1)
+function pool_alloc(bytes, pid=-1)
   # NOTE: checking the pool is really fast, and not included in the timings
   if pid != -1 && !isempty(pools_avail[pid])
     return pop!(pools_avail[pid])
   end
 
   @alloc_time "1. try alloc" begin
-    let buf = try_cuda_alloc(bytes)
+    let buf = actual_alloc(bytes)
       buf !== nothing && return buf
     end
   end
@@ -251,7 +224,7 @@ function try_alloc(bytes, pid=-1)
   end
 
   @alloc_time "4. try alloc" begin
-    let buf = try_cuda_alloc(bytes)
+    let buf = actual_alloc(bytes)
       buf !== nothing && return buf
     end
   end
@@ -269,7 +242,7 @@ function try_alloc(bytes, pid=-1)
   end
 
   @alloc_time "7. try alloc" begin
-    let buf = try_cuda_alloc(bytes)
+    let buf = actual_alloc(bytes)
       buf !== nothing && return buf
     end
   end
@@ -279,7 +252,7 @@ function try_alloc(bytes, pid=-1)
   end
 
   @alloc_time "9. try alloc" begin
-    let buf = try_cuda_alloc(bytes)
+    let buf = actual_alloc(bytes)
       buf !== nothing && return buf
     end
   end
@@ -299,7 +272,7 @@ end
 
 ## interface
 
-function init(;limit=nothing)
+function init()
   create_pools(30) # up to 512 MiB
 
   managed = parse(Bool, get(ENV, "CUARRAYS_MANAGED_POOL", "true"))
@@ -352,7 +325,7 @@ function alloc(bytes)
       @inbounds avail = pools_avail[pid]
 
       lock(pool_lock) do
-        buf = @alloc_time "pooled alloc" try_alloc(alloc_bytes, pid)
+        buf = @alloc_time "pooled alloc" pool_alloc(alloc_bytes, pid)
 
         # mark the buffer as used
         push!(used, buf)
@@ -362,7 +335,7 @@ function alloc(bytes)
         pool_usage[pid] = max(pool_usage[pid], current_usage)
       end
     else
-      buf = @alloc_time "large alloc" try_alloc(bytes)
+      buf = @alloc_time "large alloc" pool_alloc(bytes)
     end
   end
 
@@ -373,7 +346,7 @@ function alloc(bytes)
   buf
 end
 
-function dealloc(buf, bytes)
+function free(buf, bytes)
   # 0-byte allocations shouldn't hit the pool
   bytes == 0 && return
 
@@ -398,8 +371,7 @@ function dealloc(buf, bytes)
         pool_usage[pid] = max(pool_usage[pid], current_usage)
       end
     else
-      @alloc_time "large dealloc" Mem.free(buf)
-      usage[] -= bytes
+      @alloc_time "large free" actual_free(buf, bytes)
     end
   end
 

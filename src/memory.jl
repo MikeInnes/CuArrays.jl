@@ -34,10 +34,43 @@ macro alloc_time(args...)
     TimerOutputs.timer_expr(__module__, false, :(CuArrays.alloc_times[]), args...)
 end
 
-allocator_timings() = (show(alloc_times[]; allocations=false, sortby=:name); println())
+
+## underlying allocator
+
+const usage = Ref(0)
+const usage_limit = Ref{Union{Nothing,Int}}(nothing)
+
+function actual_alloc(bytes)
+  # check the memory allocation limit
+  if usage_limit[] !== nothing
+    if usage[] + bytes > usage_limit[]
+      return
+    end
+  end
+
+  # try the actual allocation
+  try
+    alloc_stats.cuda_time += Base.@elapsed begin
+      buf = Mem.alloc(Mem.Device, bytes)
+      usage[] += bytes
+    end
+    alloc_stats.actual_nalloc += 1
+    alloc_stats.actual_alloc += bytes
+    return buf
+  catch ex
+    ex == CUDAdrv.ERROR_OUT_OF_MEMORY || rethrow()
+  end
+
+  return
+end
+
+function actual_free(ptr, bytes)
+    Mem.free(buf)
+    usage[] -= bytes
+end
 
 
-## implementation
+## implementations
 
 include("memory/binned.jl")
 const allocator = BinnedPool
@@ -48,18 +81,18 @@ const allocator = BinnedPool
 # - alloc(sz)::Ptr
 const alloc = allocator.alloc
 # - free(::Ptr)
-const dealloc = allocator.dealloc
+const free = allocator.free
 
 function __init_memory__()
   alloc_times[] = TimerOutput()
 
   if haskey(ENV, "CUARRAYS_MEMORY_LIMIT")
-    limit = parse(Int, ENV["CUARRAYS_MEMORY_LIMIT"])
+    usage_limit[] = parse(Int, ENV["CUARRAYS_MEMORY_LIMIT"])
   else
-    limit = nothing
+    usage_limit[] = nothing
   end
 
-  allocator.init(;limit=limit)
+  allocator.init()
 end
 
 
@@ -72,9 +105,9 @@ macro allocated(ex)
         let
             local f
             function f()
-                b0 = stats.req_alloc
+                b0 = alloc_stats.req_alloc
                 $(esc(ex))
-                stats.req_alloc - b0
+                alloc_stats.req_alloc - b0
             end
             f()
         end
@@ -83,7 +116,7 @@ end
 
 macro time(ex)
     quote
-        local gpu_mem_stats0 = copy(stats)
+        local gpu_mem_stats0 = copy(alloc_stats)
         local cpu_mem_stats0 = Base.gc_num()
         local cpu_time0 = time_ns()
 
@@ -91,7 +124,7 @@ macro time(ex)
 
         local cpu_time1 = time_ns()
         local cpu_mem_stats1 = Base.gc_num()
-        local gpu_mem_stats1 = copy(stats)
+        local gpu_mem_stats1 = copy(alloc_stats)
 
         local cpu_time = (cpu_time1 - cpu_time0) / 1e9
         local gpu_gc_time = gpu_mem_stats1.total_time - gpu_mem_stats0.total_time
@@ -132,7 +165,7 @@ macro time(ex)
     end
 end
 
-function memory_status()
+function allocator_status()
   free_bytes, total_bytes = CUDAdrv.Mem.info()
   used_bytes = total_bytes - free_bytes
   used_ratio = used_bytes / total_bytes
@@ -141,3 +174,5 @@ function memory_status()
 
   allocator.status(used_bytes)
 end
+
+allocator_timings() = (show(alloc_times[]; allocations=false, sortby=:name); println())
