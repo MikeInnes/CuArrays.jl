@@ -1,12 +1,9 @@
 module BinnedPool
 
 import Base.GC: gc
-import ..stats
+import ..CuArrays, ..alloc_stats, ..@alloc_time
 
 using CUDAdrv
-
-using TimerOutputs
-import ..to
 
 
 # binned memory pool allocator
@@ -127,9 +124,9 @@ end
 
 # reclaim unused buffers
 function reclaim(full::Bool=false, target_bytes::Int=typemax(Int))
-  stats.total_time += Base.@elapsed begin
+  alloc_stats.total_time += Base.@elapsed begin
     # find inactive buffers
-    @timeit to[] "scan" begin
+    @alloc_time "scan" begin
       pools_inactive = Vector{Int}(undef, length(pools_avail)) # pid => buffers that can be freed
       if full
         # consider all currently unused buffers
@@ -155,7 +152,7 @@ function reclaim(full::Bool=false, target_bytes::Int=typemax(Int))
     end
 
     # reclaim buffers (in reverse, to discard largest buffers first)
-    @timeit to[] "reclaim" begin
+    @alloc_time "reclaim" begin
       for pid in reverse(eachindex(pools_inactive))
         bytes = poolsize(pid)
         avail = pools_avail[pid]
@@ -165,9 +162,9 @@ function reclaim(full::Bool=false, target_bytes::Int=typemax(Int))
         for i in 1:bufcount
           buf = pop!(avail)
 
-          stats.actual_nfree += 1
-          stats.cuda_time += Base.@elapsed Mem.free(buf)
-          stats.actual_free += bytes
+          alloc_stats.actual_nfree += 1
+          alloc_stats.cuda_time += Base.@elapsed Mem.free(buf)
+          alloc_stats.actual_free += bytes
           usage[] -= bytes
 
           target_bytes -= bytes
@@ -193,12 +190,12 @@ function try_cuda_alloc(bytes)
 
   # try the actual allocation
   try
-    stats.cuda_time += Base.@elapsed begin
+    alloc_stats.cuda_time += Base.@elapsed begin
       buf = Mem.alloc(Mem.Device, bytes)
       usage[] += bytes
     end
-    stats.actual_nalloc += 1
-    stats.actual_alloc += bytes
+    alloc_stats.actual_nalloc += 1
+    alloc_stats.actual_alloc += bytes
     return buf
   catch ex
     ex == CUDAdrv.ERROR_OUT_OF_MEMORY || rethrow()
@@ -213,7 +210,7 @@ function try_alloc(bytes, pid=-1)
     return pop!(pools_avail[pid])
   end
 
-  @timeit to[] "1 try alloc" begin
+  @alloc_time "1. try alloc" begin
     let buf = try_cuda_alloc(bytes)
       buf !== nothing && return buf
     end
@@ -238,7 +235,7 @@ function try_alloc(bytes, pid=-1)
     end
   end
 
-  @timeit to[] "2 gc(false)" begin
+  @alloc_time "2. gc(false)" begin
     gc(false) # incremental collection
   end
 
@@ -249,17 +246,17 @@ function try_alloc(bytes, pid=-1)
   # TODO: we could return a larger allocation here, but that increases memory pressure and
   #       would require proper block splitting + compaction to be any efficient.
 
-  @timeit to[] "3 reclaim unused" begin
+  @alloc_time "3. reclaim unused" begin
     reclaim(true, bytes)
   end
 
-  @timeit to[] "4 try alloc" begin
+  @alloc_time "4. try alloc" begin
     let buf = try_cuda_alloc(bytes)
       buf !== nothing && return buf
     end
   end
 
-  @timeit to[] "5 gc(true)" begin
+  @alloc_time "5. gc(true)" begin
     gc(true) # full collection
   end
 
@@ -267,21 +264,21 @@ function try_alloc(bytes, pid=-1)
     return pop!(pools_avail[pid])
   end
 
-  @timeit to[] "6 reclaim unused" begin
+  @alloc_time "6. reclaim unused" begin
     reclaim(true, bytes)
   end
 
-  @timeit to[] "7 try alloc" begin
+  @alloc_time "7. try alloc" begin
     let buf = try_cuda_alloc(bytes)
       buf !== nothing && return buf
     end
   end
 
-  @timeit to[] "8 reclaim everything" begin
+  @alloc_time "8. reclaim everything" begin
     reclaim(true)
   end
 
-  @timeit to[] "9 try alloc" begin
+  @alloc_time "9. try alloc" begin
     let buf = try_cuda_alloc(bytes)
       buf !== nothing && return buf
     end
@@ -310,7 +307,7 @@ function init(;limit=nothing)
     delay = MIN_DELAY
     @async begin
       while true
-        @timeit to[] "background task" lock(pool_lock) do
+        @alloc_time "background task" lock(pool_lock) do
           if scan()
             delay = MIN_DELAY
           else
@@ -330,8 +327,8 @@ function init(;limit=nothing)
     atexit(()->begin
       Core.println("""
         Pool statistics (managed: $(managed ? "yes" : "no")):
-         - requested alloc/free: $(stats.req_nalloc)/$(stats.req_nfree) ($(Base.format_bytes(stats.req_nalloc))/$(Base.format_bytes(stats.req_free)))
-         - actual alloc/free: $(stats.actual_nalloc)/$(stats.actual_nfree) ($(Base.format_bytes(stats.actual_alloc))/$(Base.format_bytes(stats.actual_free)))""")
+         - requested alloc/free: $(alloc_stats.req_nalloc)/$(alloc_stats.req_nfree) ($(Base.format_bytes(alloc_stats.req_nalloc))/$(Base.format_bytes(alloc_stats.req_free)))
+         - actual alloc/free: $(alloc_stats.actual_nalloc)/$(alloc_stats.actual_nfree) ($(Base.format_bytes(alloc_stats.actual_alloc))/$(Base.format_bytes(alloc_stats.actual_free)))""")
     end)
   end
 end
@@ -342,9 +339,9 @@ function alloc(bytes)
   # 0-byte allocations shouldn't hit the pool
   bytes == 0 && return Mem.alloc(Mem.Device, 0)
 
-  stats.req_nalloc += 1
-  stats.req_alloc += bytes
-  stats.total_time += Base.@elapsed begin
+  alloc_stats.req_nalloc += 1
+  alloc_stats.req_alloc += bytes
+  alloc_stats.total_time += Base.@elapsed begin
     # only manage small allocations in the pool
     if bytes <= MAX_POOL
       pid = poolidx(bytes)
@@ -355,7 +352,7 @@ function alloc(bytes)
       @inbounds avail = pools_avail[pid]
 
       lock(pool_lock) do
-        buf = @timeit to[] "pooled alloc" try_alloc(alloc_bytes, pid)
+        buf = @alloc_time "pooled alloc" try_alloc(alloc_bytes, pid)
 
         # mark the buffer as used
         push!(used, buf)
@@ -365,7 +362,7 @@ function alloc(bytes)
         pool_usage[pid] = max(pool_usage[pid], current_usage)
       end
     else
-      buf = @timeit to[] "large alloc" try_alloc(bytes)
+      buf = @alloc_time "large alloc" try_alloc(bytes)
     end
   end
 
@@ -380,9 +377,9 @@ function dealloc(buf, bytes)
   # 0-byte allocations shouldn't hit the pool
   bytes == 0 && return
 
-  stats.req_nfree += 1
-  stats.user_free += bytes
-  stats.total_time += Base.@elapsed begin
+  alloc_stats.req_nfree += 1
+  alloc_stats.user_free += bytes
+  alloc_stats.total_time += Base.@elapsed begin
     # was this a pooled buffer?
     if bytes <= MAX_POOL
       pid = poolidx(bytes)
@@ -401,7 +398,7 @@ function dealloc(buf, bytes)
         pool_usage[pid] = max(pool_usage[pid], current_usage)
       end
     else
-      @timeit to[] "large dealloc" Mem.free(buf)
+      @alloc_time "large dealloc" Mem.free(buf)
       usage[] -= bytes
     end
   end
@@ -418,7 +415,7 @@ end
 
 using Printf
 
-function status()
+function status(used_bytes)
   used_pool_buffers = 0
   used_pool_bytes = 0
   for (pid, pl) in enumerate(pools_used)

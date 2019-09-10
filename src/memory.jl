@@ -19,40 +19,39 @@ mutable struct AllocStats
   total_time::Float64
 end
 
-const stats = AllocStats(0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+const alloc_stats = AllocStats(0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
 
-Base.copy(stats::AllocStats) =
-  AllocStats((getfield(stats, field) for field in fieldnames(AllocStats))...)
+Base.copy(alloc_stats::AllocStats) =
+  AllocStats((getfield(alloc_stats, field) for field in fieldnames(AllocStats))...)
 
 
 ## timings
 
 using TimerOutputs
-const to = Ref{TimerOutput}()
+const alloc_times = Ref{TimerOutput}()
 
-function pool_timings!(new=TimerOutput())
-  to[] = new
-  return
+macro alloc_time(args...)
+    TimerOutputs.timer_expr(__module__, false, :(CuArrays.alloc_times[]), args...)
 end
 
-pool_timings() = (TimerOutputs.print_timer(to[]; allocations=false); println())
+allocator_timings() = (show(alloc_times[]; allocations=false, sortby=:name); println())
 
 
 ## implementation
 
 include("memory/binned.jl")
-const pool = BinnedPool
+const allocator = BinnedPool
 
-# memory pool API
+# allocator API
 # - init(;limit=Union{Nothing,Int})
 # - deinit()
 # - alloc(sz)::Ptr
-const alloc = pool.alloc
+const alloc = allocator.alloc
 # - free(::Ptr)
-const dealloc = pool.dealloc
+const dealloc = allocator.dealloc
 
 function __init_memory__()
-  pool_timings!()
+  alloc_times[] = TimerOutput()
 
   if haskey(ENV, "CUARRAYS_MEMORY_LIMIT")
     limit = parse(Int, ENV["CUARRAYS_MEMORY_LIMIT"])
@@ -60,7 +59,7 @@ function __init_memory__()
     limit = nothing
   end
 
-  pool.init(;limit=limit)
+  allocator.init(;limit=limit)
 end
 
 
@@ -133,12 +132,12 @@ macro time(ex)
     end
 end
 
-function pool_status()
+function memory_status()
   free_bytes, total_bytes = CUDAdrv.Mem.info()
   used_bytes = total_bytes - free_bytes
   used_ratio = used_bytes / total_bytes
 
   @printf("Total GPU memory usage: %.2f%% (%s/%s)\n", 100*used_ratio, Base.format_bytes(used_bytes), Base.format_bytes(total_bytes))
 
-  pool.status()
+  allocator.status(used_bytes)
 end
