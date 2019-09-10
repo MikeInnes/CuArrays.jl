@@ -30,7 +30,7 @@ function alloc(bytes)
     end
 end
 
-free(buf, bytes) = actual_free(buf)
+free(buf, bytes) = actual_free(buf, bytes)
 
 status(used_bytes) = return
 

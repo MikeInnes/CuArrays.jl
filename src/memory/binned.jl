@@ -159,7 +159,7 @@ function reclaim(full::Bool=false, target_bytes::Int=typemax(Int))
         for i in 1:bufcount
           buf = pop!(avail)
 
-          actual_free(buf)
+          actual_free(buf, bytes)
 
           target_bytes -= bytes
           target_bytes <= 0 && return true

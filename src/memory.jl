@@ -64,7 +64,7 @@ function actual_alloc(bytes)
   return
 end
 
-function actual_free(buf)
+function actual_free(buf, bytes)
   alloc_stats.actual_nfree += 1
   if CUDAdrv.isvalid(buf.ctx)
     alloc_stats.cuda_time += Base.@elapsed Mem.free(buf)
@@ -79,23 +79,15 @@ end
 include("memory/binned.jl")
 include("memory/dummy.jl")
 
-const allocator = if !haskey(ENV, "CUARRAYS_ALLOCATOR")
-  BinnedPool
-elseif ENV["CUARRAYS_ALLOCATOR"] == "binned"
-  BinnedPool
-elseif ENV["CUARRAYS_ALLOCATOR"] == "dummy"
-  DummyAllocator
-else
-  error("Invalid allocator selected")
-end
+const allocator = Ref{Module}(BinnedPool)
 
 # allocator API
 # - init(;limit=Union{Nothing,Int})
 # - deinit()
 # - alloc(sz)::Ptr
-const alloc = allocator.alloc
+@inline alloc(args...) = allocator[].alloc(args...)
 # - free(::Ptr)
-const free = allocator.free
+@inline free(args...) = allocator[].free(args...)
 # - status(used_bytes)
 #   print some stats about the usage (passing the GPU memory usage for % calculations)
 
@@ -104,11 +96,19 @@ function __init_memory__()
 
   if haskey(ENV, "CUARRAYS_MEMORY_LIMIT")
     usage_limit[] = parse(Int, ENV["CUARRAYS_MEMORY_LIMIT"])
-  else
-    usage_limit[] = nothing
   end
 
-  allocator.init()
+  if haskey(ENV, "CUARRAYS_ALLOCATOR")
+    allocator[] = if ENV["CUARRAYS_ALLOCATOR"] == "binned"
+      BinnedPool
+    elseif ENV["CUARRAYS_ALLOCATOR"] == "dummy"
+      DummyAllocator
+    else
+      error("Invalid allocator selected")
+    end
+  end
+
+  allocator[].init()
 end
 
 
@@ -188,7 +188,7 @@ function allocator_status()
 
   @printf("Total GPU memory usage: %.2f%% (%s/%s)\n", 100*used_ratio, Base.format_bytes(used_bytes), Base.format_bytes(total_bytes))
 
-  allocator.status(used_bytes)
+  allocator[].status(used_bytes)
 end
 
 allocator_timings() = (show(alloc_times[]; allocations=false, sortby=:name); println())
