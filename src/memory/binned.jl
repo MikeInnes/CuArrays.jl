@@ -159,10 +159,7 @@ function reclaim(full::Bool=false, target_bytes::Int=typemax(Int))
         for i in 1:bufcount
           buf = pop!(avail)
 
-          alloc_stats.actual_nfree += 1
-          alloc_stats.cuda_time += Base.@elapsed Mem.free(buf)
-          alloc_stats.actual_free += bytes
-          usage[] -= bytes
+          actual_free(buf)
 
           target_bytes -= bytes
           target_bytes <= 0 && return true
@@ -351,7 +348,7 @@ function free(buf, bytes)
   bytes == 0 && return
 
   alloc_stats.req_nfree += 1
-  alloc_stats.user_free += bytes
+  alloc_stats.req_free += bytes
   alloc_stats.total_time += Base.@elapsed begin
     # was this a pooled buffer?
     if bytes <= MAX_POOL

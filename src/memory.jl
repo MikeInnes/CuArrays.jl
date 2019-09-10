@@ -6,7 +6,7 @@ mutable struct AllocStats
   req_nfree::Int
   ## in bytes
   req_alloc::Int
-  user_free::Int
+  req_free::Int
 
   # actual allocations
   actual_nalloc::Int
@@ -64,16 +64,30 @@ function actual_alloc(bytes)
   return
 end
 
-function actual_free(ptr, bytes)
-    Mem.free(buf)
-    usage[] -= bytes
+function actual_free(buf)
+  alloc_stats.actual_nfree += 1
+  if CUDAdrv.isvalid(buf.ctx)
+    alloc_stats.cuda_time += Base.@elapsed Mem.free(buf)
+  end
+  alloc_stats.actual_free += bytes
+  usage[] -= sizeof(buf)
 end
 
 
 ## implementations
 
 include("memory/binned.jl")
-const allocator = BinnedPool
+include("memory/dummy.jl")
+
+const allocator = if !haskey(ENV, "CUARRAYS_ALLOCATOR")
+  BinnedPool
+elseif ENV["CUARRAYS_ALLOCATOR"] == "binned"
+  BinnedPool
+elseif ENV["CUARRAYS_ALLOCATOR"] == "dummy"
+  DummyAllocator
+else
+  error("Invalid allocator selected")
+end
 
 # allocator API
 # - init(;limit=Union{Nothing,Int})
@@ -82,6 +96,8 @@ const allocator = BinnedPool
 const alloc = allocator.alloc
 # - free(::Ptr)
 const free = allocator.free
+# - status(used_bytes)
+#   print some stats about the usage (passing the GPU memory usage for % calculations)
 
 function __init_memory__()
   alloc_times[] = TimerOutput()
