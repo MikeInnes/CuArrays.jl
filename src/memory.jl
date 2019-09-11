@@ -86,7 +86,7 @@ include("memory/simple.jl")
 include("memory/split.jl")
 include("memory/dummy.jl")
 
-const pool = Ref{Module}(BinnedPool)
+const pool = Ref{Union{Nothing,Module}}(nothing)
 
 # memory pool API:
 # - init()
@@ -113,14 +113,12 @@ end
 # - cached_memory()
 
 function __init_memory__()
-  TimerOutputs.reset_timer!(pool_to)
-
   if haskey(ENV, "CUARRAYS_MEMORY_LIMIT")
     usage_limit[] = parse(Int, ENV["CUARRAYS_MEMORY_LIMIT"])
   end
 
-  if haskey(ENV, "CUARRAYS_MEMORY_POOL")
-    pool[] = if ENV["CUARRAYS_MEMORY_POOL"] == "binned"
+  pool = if haskey(ENV, "CUARRAYS_MEMORY_POOL")
+    if ENV["CUARRAYS_MEMORY_POOL"] == "binned"
       BinnedPool
     elseif ENV["CUARRAYS_MEMORY_POOL"] == "simple"
       SimplePool
@@ -131,11 +129,13 @@ function __init_memory__()
     else
       error("Invalid allocator selected")
     end
+  else
+    BinnedPool
   end
+  memory_pool!(pool)
 
   # if the user hand-picked an allocator, be a little verbose
-  verbose = haskey(ENV, "CUARRAYS_MEMORY_POOL")
-  if verbose
+  if haskey(ENV, "CUARRAYS_MEMORY_POOL")
     atexit(()->begin
       Core.println("""
         CuArrays.jl $(nameof(pool[])) statistics:
@@ -143,8 +143,19 @@ function __init_memory__()
          - $(alloc_stats.actual_nalloc) CUDA allocations: $(Base.format_bytes(alloc_stats.actual_alloc)) in $(round(alloc_stats.actual_time; digits=2))s""")
     end)
   end
+end
 
-  pool[].init()
+function memory_pool!(mod::Module)
+  if pool[] !== nothing
+    pool[].deinit()
+  end
+
+  TimerOutputs.reset_timer!(pool_to)
+
+  pool[] = mod
+  mod.init()
+
+  return
 end
 
 
