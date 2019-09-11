@@ -2,7 +2,7 @@ module SimplePool
 
 # linear scan into a list of free buffers
 
-import ..@alloc_time, ..actual_alloc, ..actual_free
+import ..@pool_timeit, ..actual_alloc, ..actual_free
 
 using CUDAdrv
 
@@ -48,22 +48,22 @@ function pool_alloc(sz)
     buf = nothing
     for phase in 1:3
         if phase == 2
-            @alloc_time "$phase.0 gc(false)" GC.gc(false)
+            @pool_timeit "$phase.0 gc(false)" GC.gc(false)
         elseif phase == 3
-            @alloc_time "$phase.0 gc(true)" GC.gc(true)
+            @pool_timeit "$phase.0 gc(true)" GC.gc(true)
         end
 
-        @alloc_time "$phase.1 scan" begin
+        @pool_timeit "$phase.1 scan" begin
             buf = scan(sz)
         end
         buf === nothing || break
 
-        @alloc_time "$phase.2 alloc" begin
+        @pool_timeit "$phase.2 alloc" begin
             buf = actual_alloc(sz)
         end
         buf === nothing || break
 
-        @alloc_time "$phase.3 reclaim + alloc" begin
+        @pool_timeit "$phase.3 reclaim + alloc" begin
             reclaim(sz)
             buf = actual_alloc(sz)
         end
@@ -89,12 +89,12 @@ end
 init() = return
 
 function alloc(sz)
-    @alloc_time "pooled alloc" buf = pool_alloc(sz)
+    @pool_timeit "pooled alloc" buf = pool_alloc(sz)
     return buf
 end
 
 function free(buf, sz)
-    @alloc_time "pooled free" pool_free(buf)
+    @pool_timeit "pooled free" pool_free(buf)
     return
 end
 

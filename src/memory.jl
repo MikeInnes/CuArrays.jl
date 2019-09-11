@@ -32,10 +32,11 @@ Base.copy(alloc_stats::AllocStats) =
 ## timings
 
 using TimerOutputs
-const alloc_times = TimerOutput()
 
-macro alloc_time(args...)
-    TimerOutputs.timer_expr(__module__, false, :($CuArrays.alloc_times), args...)
+const pool_to = TimerOutput()
+
+macro pool_timeit(args...)
+    TimerOutputs.timer_expr(__module__, false, :($CuArrays.pool_to), args...)
 end
 
 
@@ -113,20 +114,20 @@ end
 # - cached_memory()
 
 function __init_memory__()
-  TimerOutputs.reset_timer!(alloc_times)
+  TimerOutputs.reset_timer!(pool_to)
 
   if haskey(ENV, "CUARRAYS_MEMORY_LIMIT")
     usage_limit[] = parse(Int, ENV["CUARRAYS_MEMORY_LIMIT"])
   end
 
-  if haskey(ENV, "CUARRAYS_ALLOCATOR")
-    allocator[] = if ENV["CUARRAYS_ALLOCATOR"] == "binned"
+  if haskey(ENV, "CUARRAYS_MEMORY_POOL")
+    allocator[] = if ENV["CUARRAYS_MEMORY_POOL"] == "binned"
       BinnedPool
-    elseif ENV["CUARRAYS_ALLOCATOR"] == "simple"
+    elseif ENV["CUARRAYS_MEMORY_POOL"] == "simple"
       SimplePool
-    elseif ENV["CUARRAYS_ALLOCATOR"] == "split"
+    elseif ENV["CUARRAYS_MEMORY_POOL"] == "split"
       SplittingPool
-    elseif ENV["CUARRAYS_ALLOCATOR"] == "dummy"
+    elseif ENV["CUARRAYS_MEMORY_POOL"] == "dummy"
       DummyPool
     else
       error("Invalid allocator selected")
@@ -134,13 +135,13 @@ function __init_memory__()
   end
 
   # if the user hand-picked an allocator, be a little verbose
-  verbose = haskey(ENV, "CUARRAYS_ALLOCATOR")
+  verbose = haskey(ENV, "CUARRAYS_MEMORY_POOL")
   if verbose
     atexit(()->begin
       Core.println("""
-        $(nameof(allocator[])) allocator statistics:
-         - requested alloc/free: $(alloc_stats.req_nalloc)/$(alloc_stats.req_nfree) ($(Base.format_bytes(alloc_stats.req_alloc))/$(Base.format_bytes(alloc_stats.req_free)))
-         - actual alloc/free: $(alloc_stats.actual_nalloc)/$(alloc_stats.actual_nfree) ($(Base.format_bytes(alloc_stats.actual_alloc))/$(Base.format_bytes(alloc_stats.actual_free)))""")
+        CuArrays.jl $(nameof(allocator[])) statistics:
+         - $(alloc_stats.req_nalloc) pool allocations: $(Base.format_bytes(alloc_stats.req_alloc)) in $(round(alloc_stats.total_time; digits=2))s
+         - $(alloc_stats.actual_nalloc) CUDA allocations: $(Base.format_bytes(alloc_stats.actual_alloc)) in $(round(alloc_stats.cuda_time; digits=2))s""")
     end)
   end
 
@@ -217,7 +218,7 @@ macro time(ex)
     end
 end
 
-function allocator_status()
+function memory_status()
   free_bytes, total_bytes = CUDAdrv.Mem.info()
   used_bytes = total_bytes - free_bytes
   used_ratio = used_bytes / total_bytes
@@ -228,7 +229,9 @@ function allocator_status()
   alloc_cached_bytes = allocator[].cached_memory()
   alloc_total_bytes = alloc_used_bytes + alloc_cached_bytes
 
-  @printf("CuArrays.jl allocator usage: %s (%s allocated, %s cached)\n", Base.format_bytes(alloc_total_bytes), Base.format_bytes(alloc_used_bytes), Base.format_bytes(alloc_cached_bytes))
+  @printf("%s usage: %s (%s allocated, %s cached)\n", nameof(allocator[]),
+          Base.format_bytes(alloc_total_bytes), Base.format_bytes(alloc_used_bytes),
+          Base.format_bytes(alloc_cached_bytes))
 end
 
-allocator_timings() = (show(alloc_times; allocations=false, sortby=:name); println())
+pool_timings() = (show(pool_to; allocations=false, sortby=:name); println())

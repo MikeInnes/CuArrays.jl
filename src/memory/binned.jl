@@ -1,10 +1,5 @@
 module BinnedPool
 
-import ..@alloc_time, ..actual_alloc, ..actual_free
-
-using CUDAdrv
-
-
 # binned memory pool allocator
 #
 # the core design is a pretty simple:
@@ -21,6 +16,10 @@ using CUDAdrv
 # - context management: either switch contexts when performing memory operations,
 #                       or just use unified memory for all allocations.
 # - per-device pools
+
+import ..@pool_timeit, ..actual_alloc, ..actual_free
+
+using CUDAdrv
 
 const pool_lock = ReentrantLock()
 
@@ -121,7 +120,7 @@ end
 # reclaim unused buffers
 function reclaim(full::Bool=false, target_bytes::Int=typemax(Int))
   # find inactive buffers
-  @alloc_time "scan" begin
+  @pool_timeit "scan" begin
     pools_inactive = Vector{Int}(undef, length(pools_avail)) # pid => buffers that can be freed
     if full
       # consider all currently unused buffers
@@ -147,7 +146,7 @@ function reclaim(full::Bool=false, target_bytes::Int=typemax(Int))
   end
 
   # reclaim buffers (in reverse, to discard largest buffers first)
-  @alloc_time "reclaim" begin
+  @pool_timeit "reclaim" begin
     for pid in reverse(eachindex(pools_inactive))
       bytes = poolsize(pid)
       avail = pools_avail[pid]
@@ -177,7 +176,7 @@ function pool_alloc(bytes, pid=-1)
     return pop!(pools_avail[pid])
   end
 
-  @alloc_time "1. try alloc" begin
+  @pool_timeit "1. try alloc" begin
     let buf = actual_alloc(bytes)
       buf !== nothing && return buf
     end
@@ -202,7 +201,7 @@ function pool_alloc(bytes, pid=-1)
     end
   end
 
-  @alloc_time "2. gc(false)" begin
+  @pool_timeit "2. gc(false)" begin
     GC.gc(false) # incremental collection
   end
 
@@ -213,17 +212,17 @@ function pool_alloc(bytes, pid=-1)
   # TODO: we could return a larger allocation here, but that increases memory pressure and
   #       would require proper block splitting + compaction to be any efficient.
 
-  @alloc_time "3. reclaim unused" begin
+  @pool_timeit "3. reclaim unused" begin
     reclaim(true, bytes)
   end
 
-  @alloc_time "4. try alloc" begin
+  @pool_timeit "4. try alloc" begin
     let buf = actual_alloc(bytes)
       buf !== nothing && return buf
     end
   end
 
-  @alloc_time "5. gc(true)" begin
+  @pool_timeit "5. gc(true)" begin
     GC.gc(true) # full collection
   end
 
@@ -231,21 +230,21 @@ function pool_alloc(bytes, pid=-1)
     return pop!(pools_avail[pid])
   end
 
-  @alloc_time "6. reclaim unused" begin
+  @pool_timeit "6. reclaim unused" begin
     reclaim(true, bytes)
   end
 
-  @alloc_time "7. try alloc" begin
+  @pool_timeit "7. try alloc" begin
     let buf = actual_alloc(bytes)
       buf !== nothing && return buf
     end
   end
 
-  @alloc_time "8. reclaim everything" begin
+  @pool_timeit "8. reclaim everything" begin
     reclaim(true)
   end
 
-  @alloc_time "9. try alloc" begin
+  @pool_timeit "9. try alloc" begin
     let buf = actual_alloc(bytes)
       buf !== nothing && return buf
     end
@@ -274,7 +273,7 @@ function init()
     delay = MIN_DELAY
     @async begin
       while true
-        @alloc_time "background task" lock(pool_lock) do
+        @pool_timeit "background task" lock(pool_lock) do
           if scan()
             delay = MIN_DELAY
           else
@@ -304,7 +303,7 @@ function alloc(bytes)
     @inbounds avail = pools_avail[pid]
 
     lock(pool_lock) do
-      buf = @alloc_time "pooled alloc" pool_alloc(alloc_bytes, pid)
+      buf = @pool_timeit "pooled alloc" pool_alloc(alloc_bytes, pid)
 
       # mark the buffer as used
       push!(used, buf)
@@ -314,7 +313,7 @@ function alloc(bytes)
       pool_usage[pid] = max(pool_usage[pid], current_usage)
     end
   else
-    buf = @alloc_time "large alloc" pool_alloc(bytes)
+    buf = @pool_timeit "large alloc" pool_alloc(bytes)
   end
 
   if tracing
@@ -346,7 +345,7 @@ function free(buf, bytes)
       pool_usage[pid] = max(pool_usage[pid], current_usage)
     end
   else
-    @alloc_time "large free" actual_free(buf, bytes)
+    @pool_timeit "large free" actual_free(buf, bytes)
   end
 
   if tracing

@@ -2,7 +2,7 @@ module SplittingPool
 
 # linear scan into a list of free buffers, splitting buffers along the way
 
-import ..@alloc_time, ..actual_alloc, ..actual_free
+import ..@pool_timeit, ..actual_alloc, ..actual_free
 
 using CUDAdrv
 
@@ -203,31 +203,31 @@ function pool_alloc(sz)
     block = nothing
     for phase in 1:3
         if phase == 2
-            @alloc_time "$phase.0 gc(false)" GC.gc(false)
+            @pool_timeit "$phase.0 gc(false)" GC.gc(false)
         elseif phase == 3
-            @alloc_time "$phase.0 gc(true)" GC.gc(true)
+            @pool_timeit "$phase.0 gc(true)" GC.gc(true)
         end
 
-        @alloc_time "$phase.1 scan" begin
+        @pool_timeit "$phase.1 scan" begin
             block = scan(sz)
         end
         block === nothing || break
 
-        @alloc_time "$phase.2 alloc" begin
+        @pool_timeit "$phase.2 alloc" begin
             buf = actual_alloc(alloc_sz)
             block = Block(buf)
         end
         block === nothing || break
 
         if can_split[]
-            @alloc_time "$phase.3 compact + scan" begin
+            @pool_timeit "$phase.3 compact + scan" begin
                 compact()
                 block = scan(sz)
             end
             block === nothing || break
         end
 
-        @alloc_time "$phase.4 reclaim + alloc" begin
+        @pool_timeit "$phase.4 reclaim + alloc" begin
             reclaim(alloc_sz)
             buf = actual_alloc(alloc_sz)
             block = Block(buf)
@@ -309,7 +309,7 @@ function init(;split=false)
 end
 
 function alloc(sz)
-    @alloc_time "pooled alloc" block = pool_alloc(sz)
+    @pool_timeit "pooled alloc" block = pool_alloc(sz)
     buf = convert(Mem.Buffer, block)
     @assert !haskey(allocated, buf)
     allocated[buf] = block
@@ -320,7 +320,7 @@ function free(buf, sz)
     block = allocated[buf]
     delete!(allocated, buf)
     @assert sizeof(block) >= sz
-    @alloc_time "pooled free" pool_free(block)
+    @pool_timeit "pooled free" pool_free(block)
     return
 end
 
