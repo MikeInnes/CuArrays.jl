@@ -26,7 +26,7 @@ const pool_lock = ReentrantLock()
 
 ## tunables
 
-const MAX_POOL = 100*1024^2 # 100 MiB
+const MAX_POOL = 2^27 # 128 MiB
 
 const USAGE_WINDOW = 5
 
@@ -45,6 +45,8 @@ const pools_avail = Vector{Vector{Mem.Buffer}}()
 
 poolidx(n) = ceil(Int, log2(n))+1
 poolsize(idx) = 2^(idx-1)
+
+@assert poolsize(poolidx(MAX_POOL)) <= MAX_POOL "MAX_POOL cutoff should close a pool"
 
 function create_pools(idx)
   if length(pool_usage) >= idx
@@ -325,8 +327,9 @@ function alloc(bytes)
   buf
 end
 
-function free(buf, bytes)
+function free(buf)
   # 0-byte allocations shouldn't hit the pool
+  bytes = sizeof(buf)
   bytes == 0 && return
 
   # was this a pooled buffer?

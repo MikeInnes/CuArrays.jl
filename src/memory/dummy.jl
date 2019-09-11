@@ -35,8 +35,7 @@ function alloc(sz)
     end
 end
 
-function free(buf, sz)
-    @assert sizeof(buf) == sz
+function free(buf)
     delete!(allocated, buf)
     actual_free(buf)
     return

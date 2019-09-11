@@ -329,10 +329,9 @@ function alloc(sz)
     return buf
 end
 
-function free(buf, sz)
+function free(buf)
     block = allocated[buf]
     delete!(allocated, buf)
-    @assert sizeof(block) >= sz
     pool_free(block)
     return
 end

@@ -5,25 +5,24 @@
 ## statistics
 
 mutable struct AllocStats
-  # allocation requests
-  req_nalloc::Int
-  req_nfree::Int
+  # pool allocation requests
+  pool_nalloc::Int
+  pool_nfree::Int
   ## in bytes
-  req_alloc::Int
-  req_free::Int
+  pool_alloc::Int
 
-  # actual allocations
+  # actual CUDA allocations
   actual_nalloc::Int
   actual_nfree::Int
   ## in bytes
   actual_alloc::Int
   actual_free::Int
 
-  cuda_time::Float64
-  total_time::Float64
+  pool_time::Float64
+  actual_time::Float64
 end
 
-const alloc_stats = AllocStats(0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+const alloc_stats = AllocStats(0, 0, 0, 0, 0, 0, 0, 0, 0)
 
 Base.copy(alloc_stats::AllocStats) =
   AllocStats((getfield(alloc_stats, field) for field in fieldnames(AllocStats))...)
@@ -55,8 +54,8 @@ function actual_alloc(bytes)
 
   # try the actual allocation
   try
-    alloc_stats.cuda_time += Base.@elapsed begin
       buf = Mem.alloc(Mem.Device, bytes)
+    alloc_stats.actual_time += Base.@elapsed begin
       usage[] += bytes
     end
     alloc_stats.actual_nalloc += 1
@@ -72,8 +71,8 @@ end
 function actual_free(buf)
   alloc_stats.actual_nfree += 1
   if CUDAdrv.isvalid(buf.ctx)
-    alloc_stats.cuda_time += Base.@elapsed Mem.free(buf)
   end
+    alloc_stats.actual_time += Base.@elapsed Mem.free(buf)
   alloc_stats.actual_free += sizeof(buf)
   usage[] -= sizeof(buf)
   return
@@ -94,21 +93,19 @@ const pool = Ref{Module}(BinnedPool)
 # - deinit()
 # - alloc(sz)::Mem.Buffer
 @inline function alloc(sz)
-  alloc_stats.req_nalloc += 1
-  alloc_stats.req_alloc += sz
-  alloc_stats.total_time += Base.@elapsed begin
+  alloc_stats.pool_nalloc += 1
+  alloc_stats.pool_alloc += sz
+  alloc_stats.pool_time += Base.@elapsed begin
     @pool_timeit "pooled alloc" buf = pool[].alloc(sz)
   end
   @assert sizeof(buf) >= sz
   return buf
 end
 # - free(::Mem.Buffer, sz)
-@inline function free(buf, sz)
-  @assert sizeof(buf) >= sz
-  alloc_stats.req_nfree += 1
-  alloc_stats.req_free += sz
-  alloc_stats.total_time += Base.@elapsed begin
-    @pool_timeit "pooled free" pool[].free(buf, sz)
+@inline function free(buf)
+  alloc_stats.pool_nfree += 1
+  alloc_stats.pool_time += Base.@elapsed begin
+    @pool_timeit "pooled free" pool[].free(buf)
   end
   return
 end
@@ -142,8 +139,8 @@ function __init_memory__()
     atexit(()->begin
       Core.println("""
         CuArrays.jl $(nameof(pool[])) statistics:
-         - $(alloc_stats.req_nalloc) pool allocations: $(Base.format_bytes(alloc_stats.req_alloc)) in $(round(alloc_stats.total_time; digits=2))s
-         - $(alloc_stats.actual_nalloc) CUDA allocations: $(Base.format_bytes(alloc_stats.actual_alloc)) in $(round(alloc_stats.cuda_time; digits=2))s""")
+         - $(alloc_stats.pool_nalloc) pool allocations: $(Base.format_bytes(alloc_stats.pool_alloc)) in $(round(alloc_stats.pool_time; digits=2))s
+         - $(alloc_stats.actual_nalloc) CUDA allocations: $(Base.format_bytes(alloc_stats.actual_alloc)) in $(round(alloc_stats.actual_time; digits=2))s""")
     end)
   end
 
@@ -160,9 +157,9 @@ macro allocated(ex)
         let
             local f
             function f()
-                b0 = alloc_stats.req_alloc
+                b0 = alloc_stats.pool_alloc
                 $(esc(ex))
-                alloc_stats.req_alloc - b0
+                alloc_stats.pool_alloc - b0
             end
             f()
         end
@@ -182,10 +179,10 @@ macro time(ex)
         local gpu_mem_stats1 = copy(alloc_stats)
 
         local cpu_time = (cpu_time1 - cpu_time0) / 1e9
-        local gpu_gc_time = gpu_mem_stats1.total_time - gpu_mem_stats0.total_time
-        local gpu_lib_time = gpu_mem_stats1.cuda_time - gpu_mem_stats0.cuda_time
-        local gpu_alloc_count = gpu_mem_stats1.req_nalloc - gpu_mem_stats0.req_nalloc
-        local gpu_alloc_size = gpu_mem_stats1.req_alloc - gpu_mem_stats0.req_alloc
+        local gpu_gc_time = gpu_mem_stats1.pool_time - gpu_mem_stats0.pool_time
+        local gpu_alloc_count = gpu_mem_stats1.pool_nalloc - gpu_mem_stats0.pool_nalloc
+        local gpu_lib_time = gpu_mem_stats1.actual_time - gpu_mem_stats0.actual_time
+        local gpu_alloc_size = gpu_mem_stats1.pool_alloc - gpu_mem_stats0.pool_alloc
         local cpu_mem_stats = Base.GC_Diff(cpu_mem_stats1, cpu_mem_stats0)
         local cpu_gc_time = cpu_mem_stats.total_time / 1e9
         local cpu_alloc_count = Base.gc_alloc_count(cpu_mem_stats)

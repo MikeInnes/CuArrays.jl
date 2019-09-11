@@ -103,7 +103,7 @@ function alloc(sz)
     return buf
 end
 
-function free(buf, sz)
+function free(buf)
     delete!(allocated, buf)
     pool_free(buf)
     return
