@@ -403,7 +403,7 @@ function status(used_bytes)
 
   pool_ratio = (used_pool_bytes + avail_pool_bytes) / used_bytes
 
-  @printf("CuArrays.jl pool usage: %.2f%% (%s in use by %d buffers, %s idle)\n", 100*pool_ratio, Base.format_bytes(used_pool_bytes), used_pool_buffers, Base.format_bytes(avail_pool_bytes))
+  @printf("CuArrays.jl binned pool usage: %.2f%% (%s in use by %d buffers, %s idle)\n", 100*pool_ratio, Base.format_bytes(used_pool_bytes), used_pool_buffers, Base.format_bytes(avail_pool_bytes))
 
   return
 end

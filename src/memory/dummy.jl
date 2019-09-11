@@ -1,4 +1,4 @@
-module DummyAllocator
+module DummyPool
 
 # dummy allocator that passes through any requests, calling into the GC if that fails.
 

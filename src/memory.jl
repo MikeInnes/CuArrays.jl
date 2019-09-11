@@ -1,3 +1,7 @@
+# TODO
+# - move retain/release to CuArrays?
+# - for linear, show(buffer) in cudadrv
+
 ## statistics
 
 mutable struct AllocStats
@@ -28,10 +32,10 @@ Base.copy(alloc_stats::AllocStats) =
 ## timings
 
 using TimerOutputs
-const alloc_times = Ref{TimerOutput}()
+const alloc_times = TimerOutput()
 
 macro alloc_time(args...)
-    TimerOutputs.timer_expr(__module__, false, :(CuArrays.alloc_times[]), args...)
+    TimerOutputs.timer_expr(__module__, false, :(CuArrays.alloc_times), args...)
 end
 
 
@@ -77,11 +81,14 @@ end
 ## implementations
 
 include("memory/binned.jl")
+include("memory/simple.jl")
+include("memory/split.jl")
 include("memory/dummy.jl")
 
 const allocator = Ref{Module}(BinnedPool)
 
 # allocator API
+# TODO: set alloc/free stats here? not in each module.
 # - init(;limit=Union{Nothing,Int})
 # - deinit()
 # - alloc(sz)::Ptr
@@ -92,7 +99,7 @@ const allocator = Ref{Module}(BinnedPool)
 #   print some stats about the usage (passing the GPU memory usage for % calculations)
 
 function __init_memory__()
-  alloc_times[] = TimerOutput()
+  TimerOutputs.reset_timer!(alloc_times)
 
   if haskey(ENV, "CUARRAYS_MEMORY_LIMIT")
     usage_limit[] = parse(Int, ENV["CUARRAYS_MEMORY_LIMIT"])
@@ -101,8 +108,12 @@ function __init_memory__()
   if haskey(ENV, "CUARRAYS_ALLOCATOR")
     allocator[] = if ENV["CUARRAYS_ALLOCATOR"] == "binned"
       BinnedPool
+    elseif ENV["CUARRAYS_ALLOCATOR"] == "simple"
+      SimplePool
+    elseif ENV["CUARRAYS_ALLOCATOR"] == "split"
+      SplittingPool
     elseif ENV["CUARRAYS_ALLOCATOR"] == "dummy"
-      DummyAllocator
+      DummyPool
     else
       error("Invalid allocator selected")
     end
@@ -191,4 +202,4 @@ function allocator_status()
   allocator[].status(used_bytes)
 end
 
-allocator_timings() = (show(alloc_times[]; allocations=false, sortby=:name); println())
+allocator_timings() = (show(alloc_times; allocations=false, sortby=:name); println())
