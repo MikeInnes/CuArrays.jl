@@ -2,12 +2,9 @@ module SimplePool
 
 # linear scan into a list of free buffers
 
-import Base.GC: gc
-import ..CuArrays, ..@alloc_time, ..actual_alloc, ..actual_free
+import ..@alloc_time, ..actual_alloc, ..actual_free
 
 using CUDAdrv
-
-using Printf
 
 using DataStructures
 
@@ -101,18 +98,8 @@ function free(buf, sz)
     return
 end
 
-function status(used_bytes)
-  used_pool_buffers = length(allocated)
-  used_pool_bytes = sum(sizeof, allocated)
+used_memory() = sum(sizeof, allocated)
 
-  avail_pool_buffers = length(available)
-  avail_pool_bytes = sum(sizeof, available)
-
-  pool_ratio = (used_pool_bytes + avail_pool_bytes) / used_bytes
-
-  @printf("CuArrays.jl simple pool usage: %.2f%% (%s in use by %d buffers, %s idle)\n", 100*pool_ratio, Base.format_bytes(used_pool_bytes), used_pool_buffers, Base.format_bytes(avail_pool_bytes))
-
-  return
-end
+cached_memory() = sum(sizeof, available)
 
 end

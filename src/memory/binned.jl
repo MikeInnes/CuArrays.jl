@@ -1,7 +1,6 @@
 module BinnedPool
 
-import Base.GC: gc
-import ..CuArrays, ..@alloc_time, ..actual_alloc, ..actual_free
+import ..@alloc_time, ..actual_alloc, ..actual_free
 
 using CUDAdrv
 
@@ -87,7 +86,7 @@ const alloc_collectables = Dict{BackTrace, Tuple{Int, Int, Int}}()
 #
 # returns a boolean indicating whether any pool is active (this can be a false negative)
 function scan()
-  gc(false) # quick, incremental collection
+  GC.gc(false) # quick, incremental collection
 
   active = false
 
@@ -189,7 +188,7 @@ function pool_alloc(bytes, pid=-1)
   if tracing
     alloc_sites_old = copy(alloc_sites)
 
-    gc(true)
+    GC.gc(true)
 
     for (buf, (bytes, bt)) in sort(collect(alloc_sites_old), by=x->x[2][1])
       if !haskey(alloc_sites, buf)
@@ -204,7 +203,7 @@ function pool_alloc(bytes, pid=-1)
   end
 
   @alloc_time "2. gc(false)" begin
-    gc(false) # incremental collection
+    GC.gc(false) # incremental collection
   end
 
   if pid != -1 && !isempty(pools_avail[pid])
@@ -225,7 +224,7 @@ function pool_alloc(bytes, pid=-1)
   end
 
   @alloc_time "5. gc(true)" begin
-    gc(true) # full collection
+    GC.gc(true) # full collection
   end
 
   if pid != -1 && !isempty(pools_avail[pid])
@@ -357,34 +356,28 @@ function free(buf, bytes)
   return
 end
 
-
-## utilities
-
-using Printf
-
-function status(used_bytes)
-  used_pool_buffers = 0
-  used_pool_bytes = 0
+function used_memory()
+  sz = 0
   for (pid, pl) in enumerate(pools_used)
     bytes = poolsize(pid)
-    used_pool_buffers += length(pl)
-    used_pool_bytes += bytes * length(pl)
+    sz += bytes * length(pl)
   end
 
-  avail_pool_buffers = 0
-  avail_pool_bytes = 0
+  return sz
+end
+
+function cached_memory()
+  sz = 0
   for (pid, pl) in enumerate(pools_avail)
     bytes = poolsize(pid)
-    avail_pool_buffers += length(pl)
-    avail_pool_bytes += bytes * length(pl)
+    sz += bytes * length(pl)
   end
 
-  pool_ratio = (used_pool_bytes + avail_pool_bytes) / used_bytes
-
-  @printf("CuArrays.jl binned pool usage: %.2f%% (%s in use by %d buffers, %s idle)\n", 100*pool_ratio, Base.format_bytes(used_pool_bytes), used_pool_buffers, Base.format_bytes(avail_pool_bytes))
-
-  return
+  return sz
 end
+
+
+## utilities
 
 function collectables()
   if !tracing

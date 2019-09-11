@@ -35,7 +35,7 @@ using TimerOutputs
 const alloc_times = TimerOutput()
 
 macro alloc_time(args...)
-    TimerOutputs.timer_expr(__module__, false, :(CuArrays.alloc_times), args...)
+    TimerOutputs.timer_expr(__module__, false, :($CuArrays.alloc_times), args...)
 end
 
 
@@ -109,8 +109,8 @@ end
   end
   return
 end
-# - status(used_bytes)
-#   print some stats about the usage (passing the GPU memory usage for % calculations)
+# - used_memory()
+# - cached_memory()
 
 function __init_memory__()
   TimerOutputs.reset_timer!(alloc_times)
@@ -224,7 +224,11 @@ function allocator_status()
 
   @printf("Total GPU memory usage: %.2f%% (%s/%s)\n", 100*used_ratio, Base.format_bytes(used_bytes), Base.format_bytes(total_bytes))
 
-  allocator[].status(used_bytes)
+  alloc_used_bytes = allocator[].used_memory()
+  alloc_cached_bytes = allocator[].cached_memory()
+  alloc_total_bytes = alloc_used_bytes + alloc_cached_bytes
+
+  @printf("CuArrays.jl allocator usage: %s (%s allocated, %s cached)\n", Base.format_bytes(alloc_total_bytes), Base.format_bytes(alloc_used_bytes), Base.format_bytes(alloc_cached_bytes))
 end
 
 allocator_timings() = (show(alloc_times; allocations=false, sortby=:name); println())

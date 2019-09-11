@@ -2,9 +2,11 @@ module DummyPool
 
 # dummy allocator that passes through any requests, calling into the GC if that fails.
 
-import ..CuArrays, ..@alloc_time, ..actual_alloc, ..actual_free
+import ..@alloc_time, ..actual_alloc, ..actual_free
 
 init() = return
+
+const usage = Ref(0)
 
 function alloc(bytes)
     buf = nothing
@@ -24,12 +26,18 @@ function alloc(bytes)
     if buf === nothing
         throw(OutOfMemoryError())
     else
+        usage[] += bytes
         return buf
     end
 end
 
-free(buf, bytes) = actual_free(buf, bytes)
+function free(buf, bytes)
+    usage[] -= bytes
+    actual_free(buf, bytes)
+end
 
-status(used_bytes) = return
+used_memory() = usage[]
+
+cached_memory() = 0
 
 end
