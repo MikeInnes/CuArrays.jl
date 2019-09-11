@@ -91,17 +91,6 @@ end
 
 init() = return
 
-function deinit()
-    @assert isempty(allocated) "Cannot deinitialize memory allocator with outstanding allocations"
-
-    for buf in available
-        actual_free(buf, sizeof(buf))
-    end
-    empty!(available)
-
-    return
-end
-
 function alloc(sz)
     @alloc_time "pooled alloc" buf = pool_alloc(sz)
     return buf

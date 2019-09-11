@@ -88,8 +88,7 @@ include("memory/dummy.jl")
 const allocator = Ref{Module}(BinnedPool)
 
 # allocator API
-# - init(;limit=Union{Nothing,Int})
-# - deinit()
+# - init()
 # - alloc(sz)::Mem.Buffer
 @inline function alloc(sz)
   alloc_stats.req_nalloc += 1

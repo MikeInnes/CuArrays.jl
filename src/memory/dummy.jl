@@ -6,8 +6,6 @@ import ..CuArrays, ..@alloc_time, ..actual_alloc, ..actual_free
 
 init() = return
 
-deinit() = return
-
 function alloc(bytes)
     buf = nothing
     for phase in 1:3
