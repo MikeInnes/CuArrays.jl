@@ -37,7 +37,7 @@ function reclaim(sz)
     freed = 0
     while freed < sz && !isempty(available)
         buf = pop!(available)
-        actual_free(buf, sizeof(buf))
+        actual_free(buf)
         freed += sizeof(buf)
     end
 

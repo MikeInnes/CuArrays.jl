@@ -8,7 +8,7 @@ init() = return
 
 const usage = Ref(0)
 
-function alloc(bytes)
+function alloc(sz)
     buf = nothing
     for phase in 1:3
         if phase == 2
@@ -18,7 +18,7 @@ function alloc(bytes)
         end
 
         @pool_timeit "$phase.1 alloc" begin
-            buf = actual_alloc(bytes)
+            buf = actual_alloc(sz)
         end
         buf === nothing || break
     end
@@ -26,14 +26,15 @@ function alloc(bytes)
     if buf === nothing
         throw(OutOfMemoryError())
     else
-        usage[] += bytes
+        usage[] += sz
         return buf
     end
 end
 
-function free(buf, bytes)
-    usage[] -= bytes
-    actual_free(buf, bytes)
+function free(buf, sz)
+    @assert sizeof(buf) == sz
+    actual_free(buf)
+    usage[] -= sz
 end
 
 used_memory() = usage[]

@@ -49,7 +49,7 @@ function actual_alloc(bytes)
   # check the memory allocation limit
   if usage_limit[] !== nothing
     if usage[] + bytes > usage_limit[]
-      return
+      return nothing
     end
   end
 
@@ -66,16 +66,17 @@ function actual_alloc(bytes)
     ex == CUDAdrv.ERROR_OUT_OF_MEMORY || rethrow()
   end
 
-  return
+  return nothing
 end
 
-function actual_free(buf, bytes)
+function actual_free(buf)
   alloc_stats.actual_nfree += 1
   if CUDAdrv.isvalid(buf.ctx)
     alloc_stats.cuda_time += Base.@elapsed Mem.free(buf)
   end
-  alloc_stats.actual_free += bytes
+  alloc_stats.actual_free += sizeof(buf)
   usage[] -= sizeof(buf)
+  return
 end
 
 

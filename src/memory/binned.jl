@@ -156,7 +156,7 @@ function reclaim(full::Bool=false, target_bytes::Int=typemax(Int))
       for i in 1:bufcount
         buf = pop!(avail)
 
-        actual_free(buf, bytes)
+        actual_free(buf)
 
         target_bytes -= bytes
         target_bytes <= 0 && return true
@@ -345,7 +345,7 @@ function free(buf, bytes)
       pool_usage[pid] = max(pool_usage[pid], current_usage)
     end
   else
-    actual_free(buf, bytes)
+    actual_free(buf)
   end
 
   if tracing
