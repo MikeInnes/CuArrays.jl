@@ -89,12 +89,11 @@ end
 init() = return
 
 function alloc(sz)
-    @pool_timeit "pooled alloc" buf = pool_alloc(sz)
-    return buf
+    return pool_alloc(sz)
 end
 
 function free(buf, sz)
-    @pool_timeit "pooled free" pool_free(buf)
+    pool_free(buf)
     return
 end
 

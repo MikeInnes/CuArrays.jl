@@ -95,7 +95,7 @@ const allocator = Ref{Module}(BinnedPool)
   alloc_stats.req_nalloc += 1
   alloc_stats.req_alloc += sz
   alloc_stats.total_time += Base.@elapsed begin
-    buf = allocator[].alloc(sz)
+    @pool_timeit "pooled alloc" buf = allocator[].alloc(sz)
   end
   @assert sizeof(buf) >= sz
   return buf
@@ -106,7 +106,7 @@ end
   alloc_stats.req_nfree += 1
   alloc_stats.req_free += sz
   alloc_stats.total_time += Base.@elapsed begin
-    allocator[].free(buf, sz)
+    @pool_timeit "pooled free" allocator[].free(buf, sz)
   end
   return
 end

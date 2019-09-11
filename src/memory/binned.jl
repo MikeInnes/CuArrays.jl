@@ -303,7 +303,7 @@ function alloc(bytes)
     @inbounds avail = pools_avail[pid]
 
     lock(pool_lock) do
-      buf = @pool_timeit "pooled alloc" pool_alloc(alloc_bytes, pid)
+      buf = pool_alloc(alloc_bytes, pid)
 
       # mark the buffer as used
       push!(used, buf)
@@ -313,7 +313,7 @@ function alloc(bytes)
       pool_usage[pid] = max(pool_usage[pid], current_usage)
     end
   else
-    buf = @pool_timeit "large alloc" pool_alloc(bytes)
+    buf = pool_alloc(bytes)
   end
 
   if tracing
@@ -345,7 +345,7 @@ function free(buf, bytes)
       pool_usage[pid] = max(pool_usage[pid], current_usage)
     end
   else
-    @pool_timeit "large free" actual_free(buf, bytes)
+    actual_free(buf, bytes)
   end
 
   if tracing

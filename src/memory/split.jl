@@ -309,7 +309,7 @@ function init(;split=false)
 end
 
 function alloc(sz)
-    @pool_timeit "pooled alloc" block = pool_alloc(sz)
+    block = pool_alloc(sz)
     buf = convert(Mem.Buffer, block)
     @assert !haskey(allocated, buf)
     allocated[buf] = block
@@ -320,7 +320,7 @@ function free(buf, sz)
     block = allocated[buf]
     delete!(allocated, buf)
     @assert sizeof(block) >= sz
-    @pool_timeit "pooled free" pool_free(block)
+    pool_free(block)
     return
 end
 
