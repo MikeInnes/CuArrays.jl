@@ -1,7 +1,7 @@
 module BinnedPool
 
 import Base.GC: gc
-import ..CuArrays, ..alloc_stats, ..@alloc_time, ..actual_alloc, ..actual_free
+import ..CuArrays, ..@alloc_time, ..actual_alloc, ..actual_free
 
 using CUDAdrv
 
@@ -121,49 +121,47 @@ end
 
 # reclaim unused buffers
 function reclaim(full::Bool=false, target_bytes::Int=typemax(Int))
-  alloc_stats.total_time += Base.@elapsed begin
-    # find inactive buffers
-    @alloc_time "scan" begin
-      pools_inactive = Vector{Int}(undef, length(pools_avail)) # pid => buffers that can be freed
-      if full
-        # consider all currently unused buffers
-        for (pid, avail) in enumerate(pools_avail)
-          pools_inactive[pid] = length(avail)
-        end
-      else
-        # only consider inactive buffers
-        @inbounds for pid in 1:length(pool_usage)
-          nused = length(pools_used[pid])
-          navail = length(pools_avail[pid])
-          recent_usage = (pool_history[pid]..., pool_usage[pid])
+  # find inactive buffers
+  @alloc_time "scan" begin
+    pools_inactive = Vector{Int}(undef, length(pools_avail)) # pid => buffers that can be freed
+    if full
+      # consider all currently unused buffers
+      for (pid, avail) in enumerate(pools_avail)
+        pools_inactive[pid] = length(avail)
+      end
+    else
+      # only consider inactive buffers
+      @inbounds for pid in 1:length(pool_usage)
+        nused = length(pools_used[pid])
+        navail = length(pools_avail[pid])
+        recent_usage = (pool_history[pid]..., pool_usage[pid])
 
-          if navail > 0
-            # reclaim as much as the usage allows
-            reclaimable = floor(Int, (1-maximum(recent_usage))*(nused+navail))
-            pools_inactive[pid] = reclaimable
-          else
-            pools_inactive[pid] = 0
-          end
+        if navail > 0
+          # reclaim as much as the usage allows
+          reclaimable = floor(Int, (1-maximum(recent_usage))*(nused+navail))
+          pools_inactive[pid] = reclaimable
+        else
+          pools_inactive[pid] = 0
         end
       end
     end
+  end
 
-    # reclaim buffers (in reverse, to discard largest buffers first)
-    @alloc_time "reclaim" begin
-      for pid in reverse(eachindex(pools_inactive))
-        bytes = poolsize(pid)
-        avail = pools_avail[pid]
+  # reclaim buffers (in reverse, to discard largest buffers first)
+  @alloc_time "reclaim" begin
+    for pid in reverse(eachindex(pools_inactive))
+      bytes = poolsize(pid)
+      avail = pools_avail[pid]
 
-        bufcount = pools_inactive[pid]
-        @assert bufcount <= length(avail)
-        for i in 1:bufcount
-          buf = pop!(avail)
+      bufcount = pools_inactive[pid]
+      @assert bufcount <= length(avail)
+      for i in 1:bufcount
+        buf = pop!(avail)
 
-          actual_free(buf, bytes)
+        actual_free(buf, bytes)
 
-          target_bytes -= bytes
-          target_bytes <= 0 && return true
-        end
+        target_bytes -= bytes
+        target_bytes <= 0 && return true
       end
     end
   end
@@ -291,16 +289,6 @@ function init()
       end
     end
   end
-
-  verbose = haskey(ENV, "CUARRAYS_MANAGED_POOL")
-  if verbose
-    atexit(()->begin
-      Core.println("""
-        Pool statistics (managed: $(managed ? "yes" : "no")):
-         - requested alloc/free: $(alloc_stats.req_nalloc)/$(alloc_stats.req_nfree) ($(Base.format_bytes(alloc_stats.req_nalloc))/$(Base.format_bytes(alloc_stats.req_free)))
-         - actual alloc/free: $(alloc_stats.actual_nalloc)/$(alloc_stats.actual_nfree) ($(Base.format_bytes(alloc_stats.actual_alloc))/$(Base.format_bytes(alloc_stats.actual_free)))""")
-    end)
-  end
 end
 
 deinit() = throw("Not implemented")
@@ -309,31 +297,27 @@ function alloc(bytes)
   # 0-byte allocations shouldn't hit the pool
   bytes == 0 && return Mem.alloc(Mem.Device, 0)
 
-  alloc_stats.req_nalloc += 1
-  alloc_stats.req_alloc += bytes
-  alloc_stats.total_time += Base.@elapsed begin
-    # only manage small allocations in the pool
-    if bytes <= MAX_POOL
-      pid = poolidx(bytes)
-      create_pools(pid)
-      alloc_bytes = poolsize(pid)
+  # only manage small allocations in the pool
+  if bytes <= MAX_POOL
+    pid = poolidx(bytes)
+    create_pools(pid)
+    alloc_bytes = poolsize(pid)
 
-      @inbounds used = pools_used[pid]
-      @inbounds avail = pools_avail[pid]
+    @inbounds used = pools_used[pid]
+    @inbounds avail = pools_avail[pid]
 
-      lock(pool_lock) do
-        buf = @alloc_time "pooled alloc" pool_alloc(alloc_bytes, pid)
+    lock(pool_lock) do
+      buf = @alloc_time "pooled alloc" pool_alloc(alloc_bytes, pid)
 
-        # mark the buffer as used
-        push!(used, buf)
+      # mark the buffer as used
+      push!(used, buf)
 
-        # update pool usage
-        current_usage = length(used) / (length(avail) + length(used))
-        pool_usage[pid] = max(pool_usage[pid], current_usage)
-      end
-    else
-      buf = @alloc_time "large alloc" pool_alloc(bytes)
+      # update pool usage
+      current_usage = length(used) / (length(avail) + length(used))
+      pool_usage[pid] = max(pool_usage[pid], current_usage)
     end
+  else
+    buf = @alloc_time "large alloc" pool_alloc(bytes)
   end
 
   if tracing
@@ -347,29 +331,25 @@ function free(buf, bytes)
   # 0-byte allocations shouldn't hit the pool
   bytes == 0 && return
 
-  alloc_stats.req_nfree += 1
-  alloc_stats.req_free += bytes
-  alloc_stats.total_time += Base.@elapsed begin
-    # was this a pooled buffer?
-    if bytes <= MAX_POOL
-      pid = poolidx(bytes)
-      @assert pid <= length(pools_used)
+  # was this a pooled buffer?
+  if bytes <= MAX_POOL
+    pid = poolidx(bytes)
+    @assert pid <= length(pools_used)
 
-      @inbounds used = pools_used[pid]
-      @inbounds avail = pools_avail[pid]
+    @inbounds used = pools_used[pid]
+    @inbounds avail = pools_avail[pid]
 
-      lock(pool_lock) do
-        # mark the buffer as available
-        delete!(used, buf)
-        push!(avail, buf)
+    lock(pool_lock) do
+      # mark the buffer as available
+      delete!(used, buf)
+      push!(avail, buf)
 
-        # update pool usage
-        current_usage = length(used) / (length(used) + length(avail))
-        pool_usage[pid] = max(pool_usage[pid], current_usage)
-      end
-    else
-      @alloc_time "large free" actual_free(buf, bytes)
+      # update pool usage
+      current_usage = length(used) / (length(used) + length(avail))
+      pool_usage[pid] = max(pool_usage[pid], current_usage)
     end
+  else
+    @alloc_time "large free" actual_free(buf, bytes)
   end
 
   if tracing

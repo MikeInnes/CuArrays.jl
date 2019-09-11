@@ -3,7 +3,7 @@ module SplittingPool
 # linear scan into a list of free buffers, splitting buffers along the way
 
 import Base.GC: gc
-import ..CuArrays, ..alloc_stats, ..@alloc_time, ..actual_alloc, ..actual_free
+import ..CuArrays, ..@alloc_time, ..actual_alloc, ..actual_free
 
 using CUDAdrv
 
@@ -325,28 +325,19 @@ function deinit()
 end
 
 function alloc(sz)
-    alloc_stats.req_nalloc += 1
-    alloc_stats.req_alloc += sz
-    alloc_stats.total_time += Base.@elapsed begin
-        @alloc_time "pooled alloc" block = pool_alloc(sz)
-        buf = convert(Mem.Buffer, block)
-        @assert !haskey(allocated, buf)
-        allocated[buf] = block
-    end
-
+    @alloc_time "pooled alloc" block = pool_alloc(sz)
+    buf = convert(Mem.Buffer, block)
+    @assert !haskey(allocated, buf)
+    allocated[buf] = block
     return buf
 end
 
 function free(buf, sz)
-    @assert sizeof(buf) >= sz
-    alloc_stats.req_nfree += 1
-    alloc_stats.req_free += sz
-    alloc_stats.total_time += Base.@elapsed begin
-        block = allocated[buf]
-        delete!(allocated, buf)
-        @assert sizeof(block) >= sz
-        @alloc_time "pooled free" pool_free(block)
-    end
+    block = allocated[buf]
+    delete!(allocated, buf)
+    @assert sizeof(block) >= sz
+    @alloc_time "pooled free" pool_free(block)
+    return
 end
 
 function status(used_bytes)

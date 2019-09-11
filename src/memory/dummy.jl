@@ -2,7 +2,7 @@ module DummyPool
 
 # dummy allocator that passes through any requests, calling into the GC if that fails.
 
-import ..CuArrays, ..alloc_stats, ..@alloc_time, ..actual_alloc, ..actual_free
+import ..CuArrays, ..@alloc_time, ..actual_alloc, ..actual_free
 
 init() = return
 

@@ -3,7 +3,7 @@ module SimplePool
 # linear scan into a list of free buffers
 
 import Base.GC: gc
-import ..CuArrays, ..alloc_stats, ..@alloc_time, ..actual_alloc, ..actual_free
+import ..CuArrays, ..@alloc_time, ..actual_alloc, ..actual_free
 
 using CUDAdrv
 
@@ -103,23 +103,12 @@ function deinit()
 end
 
 function alloc(sz)
-    alloc_stats.req_nalloc += 1
-    alloc_stats.req_alloc += sz
-    alloc_stats.total_time += Base.@elapsed begin
-        @alloc_time "pooled alloc" buf = pool_alloc(sz)
-    end
-
+    @alloc_time "pooled alloc" buf = pool_alloc(sz)
     return buf
 end
 
 function free(buf, sz)
-    alloc_stats.req_nfree += 1
-    alloc_stats.req_free += sz
-    alloc_stats.total_time += Base.@elapsed begin
-        @assert sizeof(buf) >= sz
-        @alloc_time "pooled free" pool_free(buf)
-    end
-
+    @alloc_time "pooled free" pool_free(buf)
     return
 end
 

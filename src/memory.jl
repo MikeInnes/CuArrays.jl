@@ -88,13 +88,28 @@ include("memory/dummy.jl")
 const allocator = Ref{Module}(BinnedPool)
 
 # allocator API
-# TODO: set alloc/free stats here? not in each module.
 # - init(;limit=Union{Nothing,Int})
 # - deinit()
-# - alloc(sz)::Ptr
-@inline alloc(args...) = allocator[].alloc(args...)
-# - free(::Ptr)
-@inline free(args...) = allocator[].free(args...)
+# - alloc(sz)::Mem.Buffer
+@inline function alloc(sz)
+  alloc_stats.req_nalloc += 1
+  alloc_stats.req_alloc += sz
+  alloc_stats.total_time += Base.@elapsed begin
+    buf = allocator[].alloc(sz)
+  end
+  @assert sizeof(buf) >= sz
+  return buf
+end
+# - free(::Mem.Buffer)
+@inline function free(buf, sz)
+  @assert sizeof(buf) >= sz
+  alloc_stats.req_nfree += 1
+  alloc_stats.req_free += sz
+  alloc_stats.total_time += Base.@elapsed begin
+    allocator[].free(buf, sz)
+  end
+  return
+end
 # - status(used_bytes)
 #   print some stats about the usage (passing the GPU memory usage for % calculations)
 
@@ -117,6 +132,17 @@ function __init_memory__()
     else
       error("Invalid allocator selected")
     end
+  end
+
+  # if the user hand-picked an allocator, be a little verbose
+  verbose = haskey(ENV, "CUARRAYS_ALLOCATOR")
+  if verbose
+    atexit(()->begin
+      Core.println("""
+        $(nameof(allocator[])) allocator statistics:
+         - requested alloc/free: $(alloc_stats.req_nalloc)/$(alloc_stats.req_nfree) ($(Base.format_bytes(alloc_stats.req_alloc))/$(Base.format_bytes(alloc_stats.req_free)))
+         - actual alloc/free: $(alloc_stats.actual_nalloc)/$(alloc_stats.actual_nfree) ($(Base.format_bytes(alloc_stats.actual_alloc))/$(Base.format_bytes(alloc_stats.actual_free)))""")
+    end)
   end
 
   allocator[].init()
