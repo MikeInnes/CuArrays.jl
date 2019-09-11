@@ -87,27 +87,28 @@ include("memory/simple.jl")
 include("memory/split.jl")
 include("memory/dummy.jl")
 
-const allocator = Ref{Module}(BinnedPool)
+const pool = Ref{Module}(BinnedPool)
 
-# allocator API
+# memory pool API:
 # - init()
+# - deinit()
 # - alloc(sz)::Mem.Buffer
 @inline function alloc(sz)
   alloc_stats.req_nalloc += 1
   alloc_stats.req_alloc += sz
   alloc_stats.total_time += Base.@elapsed begin
-    @pool_timeit "pooled alloc" buf = allocator[].alloc(sz)
+    @pool_timeit "pooled alloc" buf = pool[].alloc(sz)
   end
   @assert sizeof(buf) >= sz
   return buf
 end
-# - free(::Mem.Buffer)
+# - free(::Mem.Buffer, sz)
 @inline function free(buf, sz)
   @assert sizeof(buf) >= sz
   alloc_stats.req_nfree += 1
   alloc_stats.req_free += sz
   alloc_stats.total_time += Base.@elapsed begin
-    @pool_timeit "pooled free" allocator[].free(buf, sz)
+    @pool_timeit "pooled free" pool[].free(buf, sz)
   end
   return
 end
@@ -122,7 +123,7 @@ function __init_memory__()
   end
 
   if haskey(ENV, "CUARRAYS_MEMORY_POOL")
-    allocator[] = if ENV["CUARRAYS_MEMORY_POOL"] == "binned"
+    pool[] = if ENV["CUARRAYS_MEMORY_POOL"] == "binned"
       BinnedPool
     elseif ENV["CUARRAYS_MEMORY_POOL"] == "simple"
       SimplePool
@@ -140,13 +141,13 @@ function __init_memory__()
   if verbose
     atexit(()->begin
       Core.println("""
-        CuArrays.jl $(nameof(allocator[])) statistics:
+        CuArrays.jl $(nameof(pool[])) statistics:
          - $(alloc_stats.req_nalloc) pool allocations: $(Base.format_bytes(alloc_stats.req_alloc)) in $(round(alloc_stats.total_time; digits=2))s
          - $(alloc_stats.actual_nalloc) CUDA allocations: $(Base.format_bytes(alloc_stats.actual_alloc)) in $(round(alloc_stats.cuda_time; digits=2))s""")
     end)
   end
 
-  allocator[].init()
+  pool[].init()
 end
 
 
@@ -226,11 +227,11 @@ function memory_status()
 
   @printf("Total GPU memory usage: %.2f%% (%s/%s)\n", 100*used_ratio, Base.format_bytes(used_bytes), Base.format_bytes(total_bytes))
 
-  alloc_used_bytes = allocator[].used_memory()
-  alloc_cached_bytes = allocator[].cached_memory()
+  alloc_used_bytes = pool[].used_memory()
+  alloc_cached_bytes = pool[].cached_memory()
   alloc_total_bytes = alloc_used_bytes + alloc_cached_bytes
 
-  @printf("%s usage: %s (%s allocated, %s cached)\n", nameof(allocator[]),
+  @printf("%s usage: %s (%s allocated, %s cached)\n", nameof(pool[]),
           Base.format_bytes(alloc_total_bytes), Base.format_bytes(alloc_used_bytes),
           Base.format_bytes(alloc_cached_bytes))
 end

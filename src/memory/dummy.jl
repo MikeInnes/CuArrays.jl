@@ -4,9 +4,13 @@ module DummyPool
 
 import ..@pool_timeit, ..actual_alloc, ..actual_free
 
+using CUDAdrv
+
 init() = return
 
-const usage = Ref(0)
+deinit() = @assert isempty(allocated) "Cannot deinitialize memory pool with outstanding allocations"
+
+const allocated = Set{Mem.Buffer}()
 
 function alloc(sz)
     buf = nothing
@@ -26,18 +30,19 @@ function alloc(sz)
     if buf === nothing
         throw(OutOfMemoryError())
     else
-        usage[] += sz
+        push!(allocated, buf)
         return buf
     end
 end
 
 function free(buf, sz)
     @assert sizeof(buf) == sz
+    delete!(allocated, buf)
     actual_free(buf)
-    usage[] -= sz
+    return
 end
 
-used_memory() = usage[]
+used_memory() = sum(sizeof, allocated)
 
 cached_memory() = 0
 

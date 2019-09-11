@@ -73,13 +73,11 @@ function pool_alloc(sz)
     if buf === nothing
         throw(OutOfMemoryError())
     else
-        push!(allocated, buf)
         return buf
     end
 end
 
 function pool_free(buf)
-    delete!(allocated, buf)
     push!(available, buf)
 end
 
@@ -88,11 +86,25 @@ end
 
 init() = return
 
+function deinit()
+    @assert isempty(allocated) "Cannot deinitialize memory pool with outstanding allocations"
+
+    for buf in available
+        actual_free(buf)
+    end
+    empty!(available)
+
+    return
+end
+
 function alloc(sz)
-    return pool_alloc(sz)
+    buf = pool_alloc(sz)
+    push!(allocated, buf)
+    return buf
 end
 
 function free(buf, sz)
+    delete!(allocated, buf)
     pool_free(buf)
     return
 end

@@ -289,6 +289,8 @@ function init()
   end
 end
 
+deinit() = error("Not implemented")
+
 function alloc(bytes)
   # 0-byte allocations shouldn't hit the pool
   bytes == 0 && return Mem.alloc(Mem.Device, 0)

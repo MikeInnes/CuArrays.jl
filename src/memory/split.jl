@@ -308,6 +308,19 @@ function init(;split=false)
     return
 end
 
+function deinit()
+    @assert isempty(allocated) "Cannot deinitialize memory pool with outstanding allocations"
+
+    compact()
+
+    for buf in available
+        actual_free(buf)
+    end
+    empty!(available)
+
+    return
+end
+
 function alloc(sz)
     block = pool_alloc(sz)
     buf = convert(Mem.Buffer, block)
