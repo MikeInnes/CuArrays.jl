@@ -148,18 +148,18 @@ function __init_memory__()
   end
 
   if haskey(ENV, "CUARRAYS_MEMORY_POOL")
-    if ENV["CUARRAYS_MEMORY_POOL"] == "binned"
-      BinnedPool
-    elseif ENV["CUARRAYS_MEMORY_POOL"] == "simple"
-      SimplePool
-    elseif ENV["CUARRAYS_MEMORY_POOL"] == "split"
-      SplittingPool
-    elseif ENV["CUARRAYS_MEMORY_POOL"] == "dummy"
-      DummyPool
-    else
-      error("Invalid allocator selected")
-    end
-    memory_pool!(pool)
+    memory_pool!(
+      if ENV["CUARRAYS_MEMORY_POOL"] == "binned"
+        BinnedPool
+      elseif ENV["CUARRAYS_MEMORY_POOL"] == "simple"
+        SimplePool
+      elseif ENV["CUARRAYS_MEMORY_POOL"] == "split"
+        SplittingPool
+      elseif ENV["CUARRAYS_MEMORY_POOL"] == "dummy"
+        DummyPool
+      else
+        error("Invalid allocator selected")
+      end)
   else
     memory_pool!()
   end
