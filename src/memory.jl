@@ -54,12 +54,13 @@ function actual_alloc(bytes)
 
   # try the actual allocation
   try
-      buf = Mem.alloc(Mem.Device, bytes)
     alloc_stats.actual_time += Base.@elapsed begin
-      usage[] += bytes
+      buf = Mem.alloc(Mem.Device, bytes)
     end
+    @debug "Actually allocated $(Base.format_bytes(bytes))"
     alloc_stats.actual_nalloc += 1
     alloc_stats.actual_alloc += bytes
+    usage[] += bytes
     return buf
   catch ex
     ex == CUDAdrv.ERROR_OUT_OF_MEMORY || rethrow()
@@ -70,11 +71,14 @@ end
 
 function actual_free(buf)
   alloc_stats.actual_nfree += 1
-  if CUDAdrv.isvalid(buf.ctx)
-  end
-    alloc_stats.actual_time += Base.@elapsed Mem.free(buf)
   alloc_stats.actual_free += sizeof(buf)
   usage[] -= sizeof(buf)
+
+  if CUDAdrv.isvalid(buf.ctx)
+    alloc_stats.actual_time += Base.@elapsed Mem.free(buf)
+  end
+
+  @debug "Actually freed $(Base.format_bytes(sizeof(buf)))"
   return
 end
 
@@ -88,29 +92,55 @@ include("memory/dummy.jl")
 
 const pool = Ref{Union{Nothing,Module}}(nothing)
 
+const requested = Dict{Mem.Buffer,Int}()
+
+using Printf
+
 # memory pool API:
 # - init()
 # - deinit()
 # - alloc(sz)::Mem.Buffer
 @inline function alloc(sz)
-  alloc_stats.pool_nalloc += 1
-  alloc_stats.pool_alloc += sz
+  @debug "Request to alloc $(Base.format_bytes(sz))" usage=Base.format_bytes(usage[]) pool_used=Base.format_bytes(pool[].used_memory()) pool_cached=Base.format_bytes(pool[].cached_memory())
   alloc_stats.pool_time += Base.@elapsed begin
     @pool_timeit "pooled alloc" buf = pool[].alloc(sz)
   end
+  if buf === nothing
+    @error "Out of GPU memory trying to allocate $(Base.format_bytes(sz))"
+    memory_status()
+    pool[].dump()
+    throw(OutOfMemoryError())
+  end
+
   @assert sizeof(buf) >= sz
+  alloc_stats.pool_nalloc += 1
+  alloc_stats.pool_alloc += sz
+  @assert !haskey(requested, buf)
+  requested[buf] = sz
+
+  trace[] !== nothing && @printf(trace[], "alloc(%d) = %p\n", sz, buf.ptr)
+
   return buf
 end
-# - free(::Mem.Buffer, sz)
+# - free(::Mem.Buffer)
 @inline function free(buf)
+  trace[] !== nothing && @printf(trace[], "free(%p)\n", buf.ptr)
+
+  @assert haskey(requested, buf)
+  delete!(requested, buf)
+
   alloc_stats.pool_nfree += 1
   alloc_stats.pool_time += Base.@elapsed begin
     @pool_timeit "pooled free" pool[].free(buf)
   end
+
+
   return
 end
 # - used_memory()
 # - cached_memory()
+
+const trace = Ref{Union{IOStream,Nothing}}(nothing)
 
 function __init_memory__()
   if haskey(ENV, "CUARRAYS_MEMORY_LIMIT")
@@ -144,6 +174,10 @@ function __init_memory__()
     end)
   end
 end
+
+  if haskey(ENV, "CUARRAYS_MEMORY_TRACE")
+    trace[] = open(ENV["CUARRAYS_MEMORY_TRACE"], "w")
+  end
 
 function memory_pool!(mod::Module)
   if pool[] !== nothing
@@ -233,7 +267,15 @@ function memory_status()
   used_bytes = total_bytes - free_bytes
   used_ratio = used_bytes / total_bytes
 
-  @printf("Total GPU memory usage: %.2f%% (%s/%s)\n", 100*used_ratio, Base.format_bytes(used_bytes), Base.format_bytes(total_bytes))
+  @printf("Effective GPU memory usage: %.2f%% (%s/%s)\n",
+          100*used_ratio, Base.format_bytes(used_bytes),
+          Base.format_bytes(total_bytes))
+
+  @printf("CuArrays GPU memory usage: %s", Base.format_bytes(usage[]))
+  if usage_limit[] !== nothing
+    @printf(" (capped at %s)", Base.format_bytes(usage_limit[]))
+  end
+  println()
 
   alloc_used_bytes = pool[].used_memory()
   alloc_cached_bytes = pool[].cached_memory()
@@ -242,6 +284,18 @@ function memory_status()
   @printf("%s usage: %s (%s allocated, %s cached)\n", nameof(pool[]),
           Base.format_bytes(alloc_total_bytes), Base.format_bytes(alloc_used_bytes),
           Base.format_bytes(alloc_cached_bytes))
+
+  requested_bytes = reduce(+, values(requested); init=0)
+
+  @printf("%s efficiency: %.2f%% (%s requested, %s allocated)\n", nameof(pool[]),
+          100*requested_bytes/usage[],
+          Base.format_bytes(requested_bytes),
+          Base.format_bytes(usage[]))
+
+  discrepancy = usage[] - alloc_total_bytes
+  if discrepancy != 0
+    @warn "Discrepancy of $(Base.format_bytes(discrepancy)) between memory pool and allocator"
+  end
 end
 
 pool_timings() = (show(pool_to; allocations=false, sortby=:name); println())

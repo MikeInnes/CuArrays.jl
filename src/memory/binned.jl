@@ -261,7 +261,7 @@ function pool_alloc(bytes, pid=-1)
     end
   end
 
-  throw(OutOfMemoryError())
+  return nothing
 end
 
 
@@ -309,18 +309,20 @@ function alloc(bytes)
     lock(pool_lock) do
       buf = pool_alloc(alloc_bytes, pid)
 
-      # mark the buffer as used
-      push!(used, buf)
+      if buf !== nothing
+        # mark the buffer as used
+        push!(used, buf)
 
-      # update pool usage
-      current_usage = length(used) / (length(avail) + length(used))
-      pool_usage[pid] = max(pool_usage[pid], current_usage)
+        # update pool usage
+        current_usage = length(used) / (length(avail) + length(used))
+        pool_usage[pid] = max(pool_usage[pid], current_usage)
+      end
     end
   else
     buf = pool_alloc(bytes)
   end
 
-  if tracing
+  if buf !== nothing && tracing
     alloc_sites[buf] = (bytes, backtrace())
   end
 
@@ -379,6 +381,8 @@ function cached_memory()
 
   return sz
 end
+
+dump() = return
 
 
 ## utilities

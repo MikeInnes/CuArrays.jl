@@ -6,25 +6,21 @@ import ..@pool_timeit, ..actual_alloc, ..actual_free
 
 using CUDAdrv
 
-using DataStructures
-
 
 ## tunables
 
 # how much larger a buf can be to fullfil an allocation request.
 # lower values improve efficiency, but increase pressure on the underlying GC.
-const MAX_RELATIVE_OVERSIZE = 1
+const MAX_RELATIVE_OVERSIZE = 1.25
 
 
 ## pooling
 
-const IncreasingSize = Base.By(Base.sizeof)
-
-const available = SortedSet{Mem.Buffer}(IncreasingSize)
+const available = Set{Mem.Buffer}()
 const allocated = Set{Mem.Buffer}()
 
 function scan(sz)
-    for buf in available
+    for buf in sort(collect(available); by=sizeof)
         if sz <= sizeof(buf) <= sz*MAX_RELATIVE_OVERSIZE
             delete!(available, buf)
             return buf
@@ -70,11 +66,7 @@ function pool_alloc(sz)
         buf === nothing || break
     end
 
-    if buf === nothing
-        throw(OutOfMemoryError())
-    else
-        return buf
-    end
+    return buf
 end
 
 function pool_free(buf)
@@ -99,7 +91,9 @@ end
 
 function alloc(sz)
     buf = pool_alloc(sz)
-    push!(allocated, buf)
+    if buf !== nothing
+        push!(allocated, buf)
+    end
     return buf
 end
 

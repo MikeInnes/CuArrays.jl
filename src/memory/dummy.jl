@@ -27,9 +27,7 @@ function alloc(sz)
         buf === nothing || break
     end
 
-    if buf === nothing
-        throw(OutOfMemoryError())
-    else
+    if buf !== nothing
         push!(allocated, buf)
         return buf
     end
@@ -44,5 +42,7 @@ end
 used_memory() = isempty(allocated) ? 0 : sum(sizeof, allocated)
 
 cached_memory() = 0
+
+dump() = return
 
 end

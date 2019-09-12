@@ -6,23 +6,23 @@ import ..@pool_timeit, ..actual_alloc, ..actual_free
 
 using CUDAdrv
 
-using DataStructures
-
 
 ## tunables
 
-# is the pool allow to split blocks? this is for debugging only
-# (when disabled, it should perform identical to the simple pool)
-const CAN_SPLIT = true
+# pool boundaries
+const SMALL_CUTOFF   = 2^20    # 1 MiB
+const LARGE_CUTOFF   = 2^26    # 64 MiB
 
-# how much larger a block can be to fullfil an allocation request.
-# lower values improve efficiency, but increase pressure on the underlying GC.
-# this only matters when not splitting blocks.
-const MAX_RELATIVE_OVERSIZE = 2
+# memory size rounding
+const SMALL_ROUNDOFF = 2^9     # 512 bytes
+const LARGE_ROUNDOFF = 2^17    # 128 KiB
+const HUGE_ROUNDOFF  = 2^20    # 1 MiB
 
-# how much larger a block should be before splitting.
-const MIN_RELATIVE_REMAINDER = 1    # relative to an allocation request
-const MIN_ABSOLUTE_REMAINDER = 1024
+# maximum overhead (unused space) when selecting a buffer
+# small and large buffers with large overhead will be split, but huge buffers never are
+const SMALL_OVERHEAD = typemax(Int)
+const LARGE_OVERHEAD = typemax(Int)
+const HUGE_OVERHEAD  = 0
 
 
 ##
@@ -71,16 +71,6 @@ function actual_free(block::Block)
     return
 end
 
-using Printf
-function Base.show(io::IO, block::Block)
-    fields = [@sprintf("%s at %p", Base.format_bytes(sizeof(block)), pointer(block))]
-    push!(fields, "$(block.state)")
-    block.prev !== nothing && push!(fields, @sprintf("prev=Block(%p)", pointer(block.prev)))
-    block.next !== nothing && push!(fields, @sprintf("next=Block(%p)", pointer(block.next)))
-
-    print(io, "Block(", join(fields, ", "), ")")
-end
-
 # split a block at size `sz`, returning the newly created block
 function split!(block, sz)
     @assert sz < block.sz
@@ -118,20 +108,15 @@ end
 
 ## pooling
 
-const IncreasingSize = Base.By(Base.sizeof)
-
-const available = SortedSet{Block}(IncreasingSize)
-const allocated = OrderedDict{Mem.Buffer,Block}()
-
 using Base.Threads
-const pool_lock = SpinLock()   # protect against deletion from `available`
+const pool_lock = SpinLock()   # protect against deletion from freelists
 
-function scan(sz)
-    max_overhead = CAN_SPLIT ? Inf : MAX_RELATIVE_OVERSIZE
+function scan!(blocks, sz, max_overhead=typemax(Int))
+    max_sz = sz + max_overhead
     lock(pool_lock) do
-        for block in available
-            if sz <= sizeof(block) < max_overhead
-                delete!(available, block)
+        for block in sort(collect(blocks); by=sizeof)
+            if sz <= sizeof(block) <= max_sz
+                delete!(blocks, block)
                 return block
             end
         end
@@ -141,11 +126,11 @@ end
 
 # merge split blocks. happens incrementally as part of `pool_free`,
 # but requires a dedicated pass in case of alloc-heavy workloads.
-function compact()
+function compact!(blocks)
     lock(pool_lock) do
         # find the unallocated head nodes
         candidates = Set{Block}()
-        for block in available
+        for block in blocks
             if block.state == AVAILABLE
                 # get the first unallocated node in a chain
                 while block.prev !== nothing && block.prev.state == AVAILABLE
@@ -161,7 +146,7 @@ function compact()
             let block = head
                 while block.next !== nothing && block.next.state == AVAILABLE
                     block = block.next
-                    @assert block in available
+                    @assert block in blocks
                     push!(chain, block)
                 end
             end
@@ -169,10 +154,10 @@ function compact()
             # compact the chain into a single block
             if length(chain) > 1
                 for block in chain
-                    delete!(available, block)
+                    delete!(blocks, block)
                 end
                 block = merge!(chain...)
-                push!(available, block)
+                push!(blocks, block)
             end
         end
     end
@@ -180,13 +165,13 @@ function compact()
     return
 end
 
-# TODO: partial reclaim?
-function reclaim(sz)
+# TODO: partial reclaim on ordered list?
+function reclaim!(blocks, sz)
     freed = 0
     candidates = []
     lock(pool_lock) do
         # mark non-split blocks
-        for block in available
+        for block in blocks
             if iswhole(block)
                 push!(candidates, block)
             end
@@ -194,101 +179,127 @@ function reclaim(sz)
 
         # free them
         for block in candidates
-            actual_free(block)
+            delete!(blocks, block)
             freed += sizeof(block)
-            delete!(available, block)
+            actual_free(block)
         end
     end
 
     return freed
 end
 
-const ALLOC_THRESHOLD = 1*10^6  # 1 MB
-const SMALL_ROUNDOFF = 5*10^5   # 0.5 MB
-const LARGE_ROUNDOFF = 1*10^6   # 1 MB
+const SMALL = 1
+const LARGE = 2
+const HUGE  = 3
+
+const available_small = Set{Block}()
+const available_large = Set{Block}()
+const available_huge  = Set{Block}()
+const allocated = Dict{Mem.Buffer,Block}()
+
+function size_class(sz)
+    if sz <= SMALL_CUTOFF
+        SMALL
+    elseif SMALL_CUTOFF < sz <= LARGE_CUTOFF
+        LARGE
+    else
+        HUGE
+    end
+end
 
 function pool_alloc(sz)
-    # round off the allocation size
-    # FIXME: OOM
-    # roundoff = sz < ALLOC_THRESHOLD ? SMALL_ROUNDOFF : LARGE_ROUNDOFF
-    # alloc_sz = cld(sz, roundoff) * roundoff
-    # @warn "Rounding-off alloc" sz=Base.format_bytes(sz) alloc_sz=Base.format_bytes(alloc_sz)
-    alloc_sz = sz
+    szclass = size_class(sz)
+
+    # round of the block size
+    req_sz = sz
+    roundoff = (SMALL_ROUNDOFF, LARGE_ROUNDOFF, HUGE_ROUNDOFF)[szclass]
+    sz = cld(sz, roundoff) * roundoff
+    szclass = size_class(sz)
+
+    # select a pool
+    available = (available_small, available_large, available_huge)[szclass]
+
+    # determine the maximum scan overhead
+    max_overhead = (SMALL_OVERHEAD, LARGE_OVERHEAD, HUGE_OVERHEAD)[szclass]
 
     block = nothing
     for phase in 1:3
         if phase == 2
+            @debug "gc(false)"
             @pool_timeit "$phase.0 gc(false)" GC.gc(false)
         elseif phase == 3
+            @debug "gc(true)"
             @pool_timeit "$phase.0 gc(true)" GC.gc(true)
         end
 
         @pool_timeit "$phase.1 scan" begin
-            block = scan(sz)
+            block = scan!(available, sz, max_overhead)
         end
         block === nothing || break
 
         @pool_timeit "$phase.2 alloc" begin
-            buf = actual_alloc(alloc_sz)
+            buf = actual_alloc(sz)
             block = buf === nothing ? nothing : Block(buf)
         end
         block === nothing || break
 
-        if CAN_SPLIT
+        if szclass != HUGE
             @pool_timeit "$phase.3 compact + scan" begin
-                compact()
-                block = scan(sz)
+                compact!(available)
+                block = scan!(available, sz, max_overhead)
             end
             block === nothing || break
         end
 
         @pool_timeit "$phase.4 reclaim + alloc" begin
-            reclaim(alloc_sz)
-            buf = actual_alloc(alloc_sz)
+            reclaim!(available_small, sz)
+            compact!(available_large)       # TODO: make this incremental
+            reclaim!(available_large, sz)
+            compact!(available_huge)        # TODO: make this incremental
+            reclaim!(available_huge, sz)
+            # TODO: once incremental, have compact return bool if something happened, and check that it is false
+            buf = actual_alloc(sz)
             block = buf === nothing ? nothing : Block(buf)
         end
         block === nothing || break
     end
 
-    if block === nothing
-        @error "Out of memory trying to allocate $(Base.format_bytes(sz)) ($((Base.format_bytes(used_memory()))) allocated, $((Base.format_bytes(cached_memory()))) fragmented)"
-        println("Allocated buffers:")
-        for block in values(allocated)
-            println(" - ", block)
-        end
-        println("Available, but fragmented buffers:")
-        for block in values(available)
-            println(" - ", block)
-        end
-        throw(OutOfMemoryError())
-    else
-        # maybe split the block
+    if block !== nothing
+        @assert size_class(sizeof(block)) == szclass "Cannot satisfy an allocation in pool $szclass with a buffer in pool $(size_class(sizeof(block)))"
+
+        # split the block if that would yield one from the same pool
+        # (i.e. don't split off chunks that would be way smaller)
         # TODO: creates unaligned blocks
         remainder = sizeof(block) - sz
-        if CAN_SPLIT && remainder >= MIN_ABSOLUTE_REMAINDER
-            # NOTE: we only split when there's 100% overhead or more, or else a small
-            #       split-off block could keep a large unallocated chunk alive.
+        if szclass != HUGE && remainder > 0 && size_class(remainder) == szclass
             split = split!(block, sz)
             push!(available, split)
         end
 
+        @debug "Pool allocated $(Base.format_bytes(req_sz)) using a block of $(Base.format_bytes(sizeof(block))) in pool $szclass"
         block.state = ALLOCATED
-        return block
     end
+
+    return block
 end
 
 function pool_free(block)
     block.state = AVAILABLE
+
+    szclass = size_class(sizeof(block))
+    available = (available_small, available_large, available_huge)[szclass]
     push!(available, block)
+
+    @debug "Pool freed a block of $(Base.format_bytes(sizeof(block))) back in pool $szclass"
 
     # incremental block merging
     # NOTE: requires a spinlock, because finalizer are executed in the same task as the rest
     #       of the application (i.e., a reentrant lock will not prevent us from messing up
-    #       state while being held by e.g. `scan()`)
+    #       state while being held by e.g. `scan!()`)
     # FIXME: OOM
-    # if MIN_ABSOLUTE_REMAINDER && !islocked(pool_lock)
+    # if !islocked(pool_lock)
     #     lock(pool_lock) do
-    #         # specialized version of `compact()`
+    #         # specialized version of `compact!()`
     #         ## get the first unallocated node in a chain
     #         head = block
     #         while head.prev !== nothing && head.prev.state == AVAILABLE
@@ -316,6 +327,20 @@ function pool_free(block)
 end
 
 
+## utilities
+
+using Printf
+
+function Base.show(io::IO, block::Block)
+    fields = [@sprintf("%s at %p", Base.format_bytes(sizeof(block)), pointer(block))]
+    push!(fields, "$(block.state)")
+    block.prev !== nothing && push!(fields, @sprintf("prev=Block(%p)", pointer(block.prev)))
+    block.next !== nothing && push!(fields, @sprintf("next=Block(%p)", pointer(block.next)))
+
+    print(io, "Block(", join(fields, ", "), ")")
+end
+
+
 ## interface
 
 init() = return
@@ -323,22 +348,28 @@ init() = return
 function deinit()
     @assert isempty(allocated) "Cannot deinitialize memory pool with outstanding allocations"
 
-    compact()
+    for available in (available_small, available_large)
+        compact!(available)
 
-    for block in available
-        actual_free(block)
+        while !isempty(available)
+            block = pop!(available)
+            actual_free(block)
+        end
     end
-    empty!(available)
 
     return
 end
 
 function alloc(sz)
     block = pool_alloc(sz)
-    buf = convert(Mem.Buffer, block)
-    @assert !haskey(allocated, buf)
-    allocated[buf] = block
-    return buf
+    if block !== nothing
+        buf = convert(Mem.Buffer, block)
+        @assert !haskey(allocated, buf)
+        allocated[buf] = block
+        return buf
+    else
+        return nothing
+    end
 end
 
 function free(buf)
@@ -348,8 +379,26 @@ function free(buf)
     return
 end
 
-used_memory() = isempty(allocated) ? 0 : sum(sizeof, values(allocated))
+used_memory() = mapreduce(sizeof, +, values(allocated); init=0)
 
-cached_memory() = isempty(available) ? 0 : sum(sizeof, available)
+cached_memory() = mapreduce(sizeof, +, union(available_small, available_large, available_huge); init=0)
+
+function dump()
+    println("Allocated buffers: $((Base.format_bytes(used_memory())))")
+    for block in sort(collect(values(allocated)); by=sizeof)
+        println(" - ", block)
+    end
+
+    println("Available, but fragmented buffers: $((Base.format_bytes(cached_memory())))")
+    for block in sort(collect(available_small); by=sizeof)
+        println(" - small ", block)
+    end
+    for block in sort(collect(available_large); by=sizeof)
+        println(" - large ", block)
+    end
+    for block in sort(collect(available_huge); by=sizeof)
+        println(" - huge ", block)
+    end
+end
 
 end
