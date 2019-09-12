@@ -179,7 +179,7 @@ end
     trace[] = open(ENV["CUARRAYS_MEMORY_TRACE"], "w")
   end
 
-function memory_pool!(mod::Module=BinnedPool)
+function memory_pool!(mod::Module=DummyPool)
   if pool[] !== nothing
     pool[].deinit()
   end
