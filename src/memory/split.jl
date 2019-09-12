@@ -11,6 +11,10 @@ using DataStructures
 
 ## tunables
 
+# is the pool allow to split blocks? this is for debugging only
+# (when disabled, it should perform identical to the simple pool)
+const CAN_SPLIT = true
+
 # how much larger a block can be to fullfil an allocation request.
 # lower values improve efficiency, but increase pressure on the underlying GC.
 # this only matters when not splitting blocks.
@@ -19,8 +23,6 @@ const MAX_RELATIVE_OVERSIZE = 2
 # how much larger a block should be before splitting.
 const MIN_RELATIVE_REMAINDER = 1    # relative to an allocation request
 const MIN_ABSOLUTE_REMAINDER = 1024
-
-const can_split = Ref{Bool}()
 
 
 ##
@@ -55,6 +57,19 @@ Base.hash(block::Block, h::UInt) = hash(block.buf, hash(block.off, h))
 Base.:(==)(a::Block, b::Block) = (a.buf == b.buf && a.off == b.off)
 
 iswhole(block::Block) = block.prev === nothing && block.next === nothing
+
+function actual_free(block::Block)
+    @assert iswhole(block) "Cannot free a split block"
+    if block.state == ALLOCATED
+        error("Cannot free an allocated block")
+    elseif block.state == FREED
+        error("Double-free")
+    else
+        actual_free(block.buf)
+        block.state = FREED
+    end
+    return
+end
 
 using Printf
 function Base.show(io::IO, block::Block)
@@ -111,8 +126,8 @@ const allocated = OrderedDict{Mem.Buffer,Block}()
 using Base.Threads
 const pool_lock = SpinLock()   # protect against deletion from `available`
 
-function scan(sz; max_overhead=(can_split[] ? Inf : 2))
-    max_overhead = can_split[] ? Inf : MAX_RELATIVE_OVERSIZE
+function scan(sz)
+    max_overhead = CAN_SPLIT ? Inf : MAX_RELATIVE_OVERSIZE
     lock(pool_lock) do
         for block in available
             if sz <= sizeof(block) < max_overhead
@@ -215,11 +230,11 @@ function pool_alloc(sz)
 
         @pool_timeit "$phase.2 alloc" begin
             buf = actual_alloc(alloc_sz)
-            block = Block(buf)
+            block = buf === nothing ? nothing : Block(buf)
         end
         block === nothing || break
 
-        if can_split[]
+        if CAN_SPLIT
             @pool_timeit "$phase.3 compact + scan" begin
                 compact()
                 block = scan(sz)
@@ -230,13 +245,13 @@ function pool_alloc(sz)
         @pool_timeit "$phase.4 reclaim + alloc" begin
             reclaim(alloc_sz)
             buf = actual_alloc(alloc_sz)
-            block = Block(buf)
+            block = buf === nothing ? nothing : Block(buf)
         end
         block === nothing || break
     end
 
     if block === nothing
-        @error "Out of memory trying to allocate $(Base.format_bytes(sz)) ($(Base.format_bytes(sum(sizeof, values(allocated)))) allocated, $(Base.format_bytes(sum(sizeof, values(available)))) fragmented)"
+        @error "Out of memory trying to allocate $(Base.format_bytes(sz)) ($((Base.format_bytes(used_memory()))) allocated, $((Base.format_bytes(cached_memory()))) fragmented)"
         println("Allocated buffers:")
         for block in values(allocated)
             println(" - ", block)
@@ -250,7 +265,7 @@ function pool_alloc(sz)
         # maybe split the block
         # TODO: creates unaligned blocks
         remainder = sizeof(block) - sz
-        if can_split[] && remainder >= MIN_ABSOLUTE_REMAINDER && remainder >= sz * MIN_RELATIVE_REMAINDER
+        if CAN_SPLIT && remainder >= MIN_ABSOLUTE_REMAINDER
             # NOTE: we only split when there's 100% overhead or more, or else a small
             #       split-off block could keep a large unallocated chunk alive.
             split = split!(block, sz)
@@ -271,7 +286,7 @@ function pool_free(block)
     #       of the application (i.e., a reentrant lock will not prevent us from messing up
     #       state while being held by e.g. `scan()`)
     # FIXME: OOM
-    # if can_split[] && !islocked(pool_lock)
+    # if MIN_ABSOLUTE_REMAINDER && !islocked(pool_lock)
     #     lock(pool_lock) do
     #         # specialized version of `compact()`
     #         ## get the first unallocated node in a chain
@@ -303,18 +318,15 @@ end
 
 ## interface
 
-function init(;split=false)
-    can_split[] = split
-    return
-end
+init() = return
 
 function deinit()
     @assert isempty(allocated) "Cannot deinitialize memory pool with outstanding allocations"
 
     compact()
 
-    for buf in available
-        actual_free(buf)
+    for block in available
+        actual_free(block)
     end
     empty!(available)
 
@@ -336,7 +348,7 @@ function free(buf)
     return
 end
 
-used_memory() = isempty(allocated) ? 0 : sum(sizeof, allocated)
+used_memory() = isempty(allocated) ? 0 : sum(sizeof, values(allocated))
 
 cached_memory() = isempty(available) ? 0 : sum(sizeof, available)
 

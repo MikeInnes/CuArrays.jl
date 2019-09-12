@@ -13,7 +13,7 @@ using DataStructures
 
 # how much larger a buf can be to fullfil an allocation request.
 # lower values improve efficiency, but increase pressure on the underlying GC.
-const MAX_OVERSIZE_RATIO = 1
+const MAX_RELATIVE_OVERSIZE = 1
 
 
 ## pooling
@@ -25,7 +25,7 @@ const allocated = Set{Mem.Buffer}()
 
 function scan(sz)
     for buf in available
-        if sz <= sizeof(buf) <= sz*MAX_OVERSIZE_RATIO
+        if sz <= sizeof(buf) <= sz*MAX_RELATIVE_OVERSIZE
             delete!(available, buf)
             return buf
         end
