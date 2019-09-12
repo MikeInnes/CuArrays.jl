@@ -138,7 +138,7 @@ function __init_memory__()
   if haskey(ENV, "CUARRAYS_MEMORY_POOL")
     atexit(()->begin
       Core.println("""
-        CuArrays.jl $(nameof(pool[])) statistics:
+        CuArrays.jl $(nameof(pool)) statistics:
          - $(alloc_stats.pool_nalloc) pool allocations: $(Base.format_bytes(alloc_stats.pool_alloc)) in $(round(alloc_stats.pool_time; digits=2))s
          - $(alloc_stats.actual_nalloc) CUDA allocations: $(Base.format_bytes(alloc_stats.actual_alloc)) in $(round(alloc_stats.actual_time; digits=2))s""")
     end)
