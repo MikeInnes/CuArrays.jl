@@ -11,7 +11,16 @@ using CUDAdrv
 
 # how much larger a buf can be to fullfil an allocation request.
 # lower values improve efficiency, but increase pressure on the underlying GC.
-const MAX_RELATIVE_OVERSIZE = 1.25
+function max_oversize(sz)
+    if sz <= 2^20       # 1 MiB
+        # small buffers are fine no matter
+        return typemax(Int)
+    elseif sz <= 2^20   # 32 MiB
+        return 2^20
+    else
+        return 2^22
+    end
+end
 
 
 ## pooling
@@ -21,7 +30,7 @@ const allocated = Set{Mem.Buffer}()
 
 function scan(sz)
     for buf in sort(collect(available); by=sizeof)
-        if sz <= sizeof(buf) <= sz*MAX_RELATIVE_OVERSIZE
+        if sz <= sizeof(buf) <= max_oversize(sz)
             delete!(available, buf)
             return buf
         end
@@ -106,5 +115,7 @@ end
 used_memory() = isempty(allocated) ? 0 : sum(sizeof, allocated)
 
 cached_memory() = isempty(available) ? 0 : sum(sizeof, available)
+
+dump() = return
 
 end

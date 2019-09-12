@@ -147,7 +147,7 @@ function __init_memory__()
     usage_limit[] = parse(Int, ENV["CUARRAYS_MEMORY_LIMIT"])
   end
 
-  pool = if haskey(ENV, "CUARRAYS_MEMORY_POOL")
+  if haskey(ENV, "CUARRAYS_MEMORY_POOL")
     if ENV["CUARRAYS_MEMORY_POOL"] == "binned"
       BinnedPool
     elseif ENV["CUARRAYS_MEMORY_POOL"] == "simple"
@@ -159,16 +159,16 @@ function __init_memory__()
     else
       error("Invalid allocator selected")
     end
+    memory_pool!(pool)
   else
-    BinnedPool
+    memory_pool!()
   end
-  memory_pool!(pool)
 
   # if the user hand-picked an allocator, be a little verbose
   if haskey(ENV, "CUARRAYS_MEMORY_POOL")
     atexit(()->begin
       Core.println("""
-        CuArrays.jl $(nameof(pool)) statistics:
+        CuArrays.jl $(nameof(pool[])) statistics:
          - $(alloc_stats.pool_nalloc) pool allocations: $(Base.format_bytes(alloc_stats.pool_alloc)) in $(round(alloc_stats.pool_time; digits=2))s
          - $(alloc_stats.actual_nalloc) CUDA allocations: $(Base.format_bytes(alloc_stats.actual_alloc)) in $(round(alloc_stats.actual_time; digits=2))s""")
     end)
@@ -179,7 +179,7 @@ end
     trace[] = open(ENV["CUARRAYS_MEMORY_TRACE"], "w")
   end
 
-function memory_pool!(mod::Module)
+function memory_pool!(mod::Module=BinnedPool)
   if pool[] !== nothing
     pool[].deinit()
   end
