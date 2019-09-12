@@ -109,8 +109,8 @@ function free(buf)
     return
 end
 
-used_memory() = sum(sizeof, allocated)
+used_memory() = isempty(allocated) ? 0 : sum(sizeof, allocated)
 
-cached_memory() = sum(sizeof, available)
+cached_memory() = isempty(available) ? 0 : sum(sizeof, available)
 
 end

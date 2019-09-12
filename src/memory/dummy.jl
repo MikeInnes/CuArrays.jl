@@ -41,7 +41,7 @@ function free(buf)
     return
 end
 
-used_memory() = sum(sizeof, allocated)
+used_memory() = isempty(allocated) ? 0 : sum(sizeof, allocated)
 
 cached_memory() = 0
 
