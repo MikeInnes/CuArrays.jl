@@ -1,10 +1,8 @@
 module SimplePool
 
-# linear scan into a list of free buffers
+# simple scan into a list of free buffers
 
 import ..@pool_timeit, ..actual_alloc, ..actual_free
-
-using DataStructures
 
 using CUDAdrv
 
@@ -27,14 +25,7 @@ end
 
 ## pooling
 
-# sorted containers need unique keys, which the size of a buffer isn't.
-# mix in the buffer address to keep the key sortable, but unique.
-# the size is shifted 24 bits, and as many identifier bits are mixed in,
-# supporting 16777216 unique allocations of up to 1 TiB.
-unique_sizeof(buf::Mem.Buffer) = (UInt64(sizeof(buf))<<24) | (UInt64(pointer(buf)) & (2<<24-1))
-const UniqueIncreasingSize = Base.By(unique_sizeof)
-
-const available = SortedSet{Mem.Buffer}(UniqueIncreasingSize)
+const available = Set{Mem.Buffer}()
 const allocated = Set{Mem.Buffer}()
 
 function scan(sz)

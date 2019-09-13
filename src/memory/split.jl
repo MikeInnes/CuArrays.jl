@@ -1,6 +1,6 @@
 module SplittingPool
 
-# linear scan into a list of free buffers, splitting buffers along the way
+# scan into a sorted list of free buffers, splitting buffers along the way
 #
 # TODO
 # - avoid the duplicated compaction functionality (compact! and pool_free)
@@ -42,6 +42,9 @@ using Printf
     FREED
 end
 
+const block_id = Ref(UInt(0))
+
+# TODO: it would be nice if this could be immutable, since that's what OrderedSet requires
 mutable struct Block
     buf::Mem.Buffer     # base allocation
     sz::Integer         # size into it
@@ -51,14 +54,16 @@ mutable struct Block
     prev::Union{Nothing,Block}
     next::Union{Nothing,Block}
 
+    id::UInt
+
     Block(buf, sz=sizeof(buf), off=0, state=AVAILABLE, prev=nothing, next=nothing) =
-        new(buf, sz, off, state, prev, next)
+        new(buf, sz, off, state, prev, next, block_id[]+=1)
 end
 
 Base.sizeof(block::Block) = block.sz
 Base.pointer(block::Block) = pointer(block.buf) + block.off
 
-convert(::Type{Mem.Buffer}, block::Block) = similar(block.buf, pointer(block), sizeof(block))
+Base.convert(::Type{Mem.Buffer}, block::Block) = similar(block.buf, pointer(block), sizeof(block))
 
 iswhole(block::Block) = block.prev === nothing && block.next === nothing
 
@@ -66,10 +71,11 @@ iswhole(block::Block) = block.prev === nothing && block.next === nothing
 ## block utilities
 
 function Base.show(io::IO, block::Block)
-    fields = [@sprintf("%s at %p", Base.format_bytes(sizeof(block)), pointer(block))]
+    fields = [@sprintf("#%d", block.id)]
+    push!(fields, @sprintf("%s at %p", Base.format_bytes(sizeof(block)), pointer(block)))
     push!(fields, "$(block.state)")
-    block.prev !== nothing && push!(fields, @sprintf("prev=Block(%p)", pointer(block.prev)))
-    block.next !== nothing && push!(fields, @sprintf("next=Block(%p)", pointer(block.next)))
+    block.prev !== nothing && push!(fields, @sprintf("prev=Block(#%d)", block.prev.id))
+    block.next !== nothing && push!(fields, @sprintf("next=Block(#%d)", block.next.id))
 
     print(io, "Block(", join(fields, ", "), ")")
 end
@@ -210,9 +216,9 @@ const HUGE  = 3
 
 # sorted containers need unique keys, which the size of a block isn't.
 # mix in the block address to keep the key sortable, but unique.
-# the size is shifted 24 bits, and as many identifier bits are mixed in,
-# supporting 16777216 unique allocations of up to 1 TiB.
-unique_sizeof(block::Block) = (UInt64(sizeof(block))<<24) | (UInt64(pointer(block)) & (2<<24-1))
+# the size is shifted 24 bits, and as many identifier bits are
+# mixed in, supporting 16777216 unique allocations of up to 1 TiB.
+unique_sizeof(block::Block) = (UInt64(sizeof(block))<<24) | (UInt64(block.id) & (2<<24-1))
 const UniqueIncreasingSize = Base.By(unique_sizeof)
 
 const available_small = SortedSet{Block}(UniqueIncreasingSize)
@@ -309,6 +315,7 @@ function pool_free(block)
 
     szclass = size_class(sizeof(block))
     available = (available_small, available_large, available_huge)[szclass]
+    @assert !in(block, available) "Collision in the available memory pool"
     push!(available, block)
 
     # incremental block merging
