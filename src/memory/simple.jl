@@ -29,6 +29,8 @@ const available = Set{Mem.Buffer}()
 const allocated = Set{Mem.Buffer}()
 
 function scan(sz)
+    # TODO: avoid sort by using a sorted container
+    #       https://github.com/JuliaCollections/DataStructures.jl/issues/528
     for buf in sort(collect(available); by=sizeof)
         if sz <= sizeof(buf) <= max_oversize(sz)
             delete!(available, buf)

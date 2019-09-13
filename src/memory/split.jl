@@ -1,6 +1,11 @@
 module SplittingPool
 
 # linear scan into a list of free buffers, splitting buffers along the way
+#
+# TODO
+# - avoid the duplicated compaction functionality (compact! and pool_free)
+#   currently split because the finalizer musn't mess with any of the pools
+#   while it is being processed by other routines. maybe use a pending_freed blocks?
 
 import ..@pool_timeit, ..actual_alloc, ..actual_free
 
@@ -11,7 +16,7 @@ using CUDAdrv
 
 # pool boundaries
 const SMALL_CUTOFF   = 2^20    # 1 MiB
-const LARGE_CUTOFF   = 2^26    # 64 MiB
+const LARGE_CUTOFF   = 2^25    # 32 MiB
 
 # memory size rounding
 const SMALL_ROUNDOFF = 2^9     # 512 bytes
@@ -112,8 +117,10 @@ using Base.Threads
 const pool_lock = SpinLock()   # protect against deletion from freelists
 
 function scan!(blocks, sz, max_overhead=typemax(Int))
-    max_sz = sz + max_overhead
+    max_sz = max(sz + max_overhead, max_overhead)   # protect against overflow
     lock(pool_lock) do
+        # TODO: avoid sort by using a sorted container
+        #       https://github.com/JuliaCollections/DataStructures.jl/issues/528
         for block in sort(collect(blocks); by=sizeof)
             if sz <= sizeof(block) <= max_sz
                 delete!(blocks, block)
@@ -225,11 +232,9 @@ function pool_alloc(sz)
     block = nothing
     for phase in 1:3
         if phase == 2
-            @debug "gc(false)"
-            @pool_timeit "$phase.0 gc(false)" GC.gc(false)
+           @pool_timeit "$phase.0 gc(false)" GC.gc(false)
         elseif phase == 3
-            @debug "gc(true)"
-            @pool_timeit "$phase.0 gc(true)" GC.gc(true)
+           @pool_timeit "$phase.0 gc(true)" GC.gc(true)
         end
 
         @pool_timeit "$phase.1 scan" begin
@@ -269,14 +274,14 @@ function pool_alloc(sz)
 
         # split the block if that would yield one from the same pool
         # (i.e. don't split off chunks that would be way smaller)
-        # TODO: creates unaligned blocks
+        # TODO: avoid creating unaligned blocks here (doesn't currently seem to happen
+        #       because of the roundoff, but we should take care anyway)
         remainder = sizeof(block) - sz
         if szclass != HUGE && remainder > 0 && size_class(remainder) == szclass
             split = split!(block, sz)
             push!(available, split)
         end
 
-        @debug "Pool allocated $(Base.format_bytes(req_sz)) using a block of $(Base.format_bytes(sizeof(block))) in pool $szclass"
         block.state = ALLOCATED
     end
 
@@ -290,40 +295,37 @@ function pool_free(block)
     available = (available_small, available_large, available_huge)[szclass]
     push!(available, block)
 
-    @debug "Pool freed a block of $(Base.format_bytes(sizeof(block))) back in pool $szclass"
-
     # incremental block merging
     # NOTE: requires a spinlock, because finalizer are executed in the same task as the rest
     #       of the application (i.e., a reentrant lock will not prevent us from messing up
     #       state while being held by e.g. `scan!()`)
-    # FIXME: OOM
-    # if !islocked(pool_lock)
-    #     lock(pool_lock) do
-    #         # specialized version of `compact!()`
-    #         ## get the first unallocated node in a chain
-    #         head = block
-    #         while head.prev !== nothing && head.prev.state == AVAILABLE
-    #             head = head.prev
-    #         end
-    #         ## construct a chain of unallocated blocks
-    #         chain = [head]
-    #         let block = head
-    #             while block.next !== nothing && block.next.state == AVAILABLE
-    #                 block = block.next
-    #                 @assert block in available
-    #                 push!(chain, block)
-    #             end
-    #         end
-    #         ## compact the chain into a single block
-    #         if length(chain) > 1
-    #             for block in chain
-    #                 delete!(available, block)
-    #             end
-    #             block = merge!(chain...)
-    #             push!(available, block)
-    #         end
-    #     end
-    # end
+    if !islocked(pool_lock)
+        lock(pool_lock) do
+            # specialized version of `compact!()`
+            ## get the first unallocated node in a chain
+            head = block
+            while head.prev !== nothing && head.prev.state == AVAILABLE
+                head = head.prev
+            end
+            ## construct a chain of unallocated blocks
+            chain = [head]
+            let block = head
+                while block.next !== nothing && block.next.state == AVAILABLE
+                    block = block.next
+                    @assert block in available
+                    push!(chain, block)
+                end
+            end
+            ## compact the chain into a single block
+            if length(chain) > 1
+                for block in chain
+                    delete!(available, block)
+                end
+                block = merge!(chain...)
+                push!(available, block)
+            end
+        end
+    end
 end
 
 

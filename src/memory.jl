@@ -1,8 +1,6 @@
-# TODO
-# - move retain/release to CuArrays?
-# - for linear, show(buffer) in cudadrv
+# GPU memory management and pooling
 
-## statistics
+## allocation statistics
 
 mutable struct AllocStats
   # pool allocation requests
@@ -28,18 +26,7 @@ Base.copy(alloc_stats::AllocStats) =
   AllocStats((getfield(alloc_stats, field) for field in fieldnames(AllocStats))...)
 
 
-## timings
-
-using TimerOutputs
-
-const pool_to = TimerOutput()
-
-macro pool_timeit(args...)
-    TimerOutputs.timer_expr(__module__, false, :($CuArrays.pool_to), args...)
-end
-
-
-## underlying allocator
+## CUDA allocator
 
 const usage = Ref(0)
 const usage_limit = Ref{Union{Nothing,Int}}(nothing)
@@ -57,7 +44,6 @@ function actual_alloc(bytes)
     alloc_stats.actual_time += Base.@elapsed begin
       buf = Mem.alloc(Mem.Device, bytes)
     end
-    @debug "Actually allocated $(Base.format_bytes(bytes))"
     alloc_stats.actual_nalloc += 1
     alloc_stats.actual_alloc += bytes
     usage[] += bytes
@@ -78,12 +64,30 @@ function actual_free(buf)
     alloc_stats.actual_time += Base.@elapsed Mem.free(buf)
   end
 
-  @debug "Actually freed $(Base.format_bytes(sizeof(buf)))"
   return
 end
 
 
-## implementations
+## pool timings
+
+using TimerOutputs
+
+const pool_to = TimerOutput()
+
+macro pool_timeit(args...)
+    TimerOutputs.timer_expr(__module__, false, :($CuArrays.pool_to), args...)
+end
+
+
+## pool implementations
+
+# API:
+# - init()
+# - deinit()
+# - alloc(sz)::Mem.Buffer
+# - free(::Mem.Buffer)
+# - used_memory()
+# - cached_memory()
 
 include("memory/binned.jl")
 include("memory/simple.jl")
@@ -94,14 +98,7 @@ const pool = Ref{Union{Nothing,Module}}(nothing)
 
 const requested = Dict{Mem.Buffer,Int}()
 
-using Printf
-
-# memory pool API:
-# - init()
-# - deinit()
-# - alloc(sz)::Mem.Buffer
 @inline function alloc(sz)
-  @debug "Request to alloc $(Base.format_bytes(sz))" usage=Base.format_bytes(usage[]) pool_used=Base.format_bytes(pool[].used_memory()) pool_cached=Base.format_bytes(pool[].cached_memory())
   alloc_stats.pool_time += Base.@elapsed begin
     @pool_timeit "pooled alloc" buf = pool[].alloc(sz)
   end
@@ -118,14 +115,10 @@ using Printf
   @assert !haskey(requested, buf)
   requested[buf] = sz
 
-  trace[] !== nothing && @printf(trace[], "alloc(%d) = %p\n", sz, buf.ptr)
-
   return buf
 end
-# - free(::Mem.Buffer)
-@inline function free(buf)
-  trace[] !== nothing && @printf(trace[], "free(%p)\n", buf.ptr)
 
+@inline function free(buf)
   @assert haskey(requested, buf)
   delete!(requested, buf)
 
@@ -134,13 +127,8 @@ end
     @pool_timeit "pooled free" pool[].free(buf)
   end
 
-
   return
 end
-# - used_memory()
-# - cached_memory()
-
-const trace = Ref{Union{IOStream,Nothing}}(nothing)
 
 function __init_memory__()
   if haskey(ENV, "CUARRAYS_MEMORY_LIMIT")
@@ -175,11 +163,7 @@ function __init_memory__()
   end
 end
 
-  if haskey(ENV, "CUARRAYS_MEMORY_TRACE")
-    trace[] = open(ENV["CUARRAYS_MEMORY_TRACE"], "w")
-  end
-
-function memory_pool!(mod::Module=DummyPool)
+function memory_pool!(mod::Module=BinnedPool)
   if pool[] !== nothing
     pool[].deinit()
   end
@@ -292,9 +276,11 @@ function memory_status()
           Base.format_bytes(requested_bytes),
           Base.format_bytes(usage[]))
 
+  # check if the memory usage as counted by the CUDA allocator wrapper
+  # matches what is reported by the pool implementation
   discrepancy = usage[] - alloc_total_bytes
   if discrepancy != 0
-    @warn "Discrepancy of $(Base.format_bytes(discrepancy)) between memory pool and allocator"
+    @debug "Discrepancy of $(Base.format_bytes(discrepancy)) between memory pool and allocator"
   end
 end
 
