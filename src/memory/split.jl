@@ -9,6 +9,8 @@ module SplittingPool
 
 import ..@pool_timeit, ..actual_alloc, ..actual_free
 
+using DataStructures
+
 using CUDAdrv
 
 
@@ -30,7 +32,9 @@ const LARGE_OVERHEAD = typemax(Int)
 const HUGE_OVERHEAD  = 0
 
 
-##
+## block of memory
+
+using Printf
 
 @enum BlockState begin
     AVAILABLE
@@ -49,7 +53,6 @@ mutable struct Block
 
     Block(buf, sz=sizeof(buf), off=0, state=AVAILABLE, prev=nothing, next=nothing) =
         new(buf, sz, off, state, prev, next)
-    Block(b::Block) = new(b.buf, b.sz, b.off, b.state, b.prev, b.next)
 end
 
 Base.sizeof(block::Block) = block.sz
@@ -57,23 +60,18 @@ Base.pointer(block::Block) = pointer(block.buf) + block.off
 
 convert(::Type{Mem.Buffer}, block::Block) = similar(block.buf, pointer(block), sizeof(block))
 
-# blocks are equal if the base allocation and offset is the same
-Base.hash(block::Block, h::UInt) = hash(block.buf, hash(block.off, h))
-Base.:(==)(a::Block, b::Block) = (a.buf == b.buf && a.off == b.off)
-
 iswhole(block::Block) = block.prev === nothing && block.next === nothing
 
-function actual_free(block::Block)
-    @assert iswhole(block) "Cannot free a split block"
-    if block.state == ALLOCATED
-        error("Cannot free an allocated block")
-    elseif block.state == FREED
-        error("Double-free")
-    else
-        actual_free(block.buf)
-        block.state = FREED
-    end
-    return
+
+## block utilities
+
+function Base.show(io::IO, block::Block)
+    fields = [@sprintf("%s at %p", Base.format_bytes(sizeof(block)), pointer(block))]
+    push!(fields, "$(block.state)")
+    block.prev !== nothing && push!(fields, @sprintf("prev=Block(%p)", pointer(block.prev)))
+    block.next !== nothing && push!(fields, @sprintf("next=Block(%p)", pointer(block.next)))
+
+    print(io, "Block(", join(fields, ", "), ")")
 end
 
 # split a block at size `sz`, returning the newly created block
@@ -110,6 +108,19 @@ function merge!(head, blocks...)
     return head
 end
 
+function actual_free(block::Block)
+    @assert iswhole(block) "Cannot free a split block"
+    if block.state == ALLOCATED
+        error("Cannot free an allocated block")
+    elseif block.state == FREED
+        error("Double-free")
+    else
+        actual_free(block.buf)
+        block.state = FREED
+    end
+    return
+end
+
 
 ## pooling
 
@@ -119,9 +130,7 @@ const pool_lock = SpinLock()   # protect against deletion from freelists
 function scan!(blocks, sz, max_overhead=typemax(Int))
     max_sz = max(sz + max_overhead, max_overhead)   # protect against overflow
     lock(pool_lock) do
-        # TODO: avoid sort by using a sorted container
-        #       https://github.com/JuliaCollections/DataStructures.jl/issues/528
-        for block in sort(collect(blocks); by=sizeof)
+        for block in blocks
             if sz <= sizeof(block) <= max_sz
                 delete!(blocks, block)
                 return block
@@ -199,9 +208,16 @@ const SMALL = 1
 const LARGE = 2
 const HUGE  = 3
 
-const available_small = Set{Block}()
-const available_large = Set{Block}()
-const available_huge  = Set{Block}()
+# sorted containers need unique keys, which the size of a block isn't.
+# mix in the block address to keep the key sortable, but unique.
+# the size is shifted 24 bits, and as many identifier bits are mixed in,
+# supporting 16777216 unique allocations of up to 1 TiB.
+unique_sizeof(block::Block) = (UInt64(sizeof(block))<<24) | (UInt64(pointer(block)) & (2<<24-1))
+const UniqueIncreasingSize = Base.By(unique_sizeof)
+
+const available_small = SortedSet{Block}(UniqueIncreasingSize)
+const available_large = SortedSet{Block}(UniqueIncreasingSize)
+const available_huge  = SortedSet{Block}(UniqueIncreasingSize)
 const allocated = Dict{Mem.Buffer,Block}()
 
 function size_class(sz)
@@ -329,20 +345,6 @@ function pool_free(block)
 end
 
 
-## utilities
-
-using Printf
-
-function Base.show(io::IO, block::Block)
-    fields = [@sprintf("%s at %p", Base.format_bytes(sizeof(block)), pointer(block))]
-    push!(fields, "$(block.state)")
-    block.prev !== nothing && push!(fields, @sprintf("prev=Block(%p)", pointer(block.prev)))
-    block.next !== nothing && push!(fields, @sprintf("next=Block(%p)", pointer(block.next)))
-
-    print(io, "Block(", join(fields, ", "), ")")
-end
-
-
 ## interface
 
 init() = return
@@ -392,13 +394,13 @@ function dump()
     end
 
     println("Available, but fragmented buffers: $((Base.format_bytes(cached_memory())))")
-    for block in sort(collect(available_small); by=sizeof)
+    for block in available_small
         println(" - small ", block)
     end
-    for block in sort(collect(available_large); by=sizeof)
+    for block in available_large
         println(" - large ", block)
     end
-    for block in sort(collect(available_huge); by=sizeof)
+    for block in available_huge
         println(" - huge ", block)
     end
 end
