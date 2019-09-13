@@ -1,11 +1,6 @@
 module SplittingPool
 
 # scan into a sorted list of free buffers, splitting buffers along the way
-#
-# TODO
-# - avoid the duplicated compaction functionality (compact! and pool_free)
-#   currently split because the finalizer musn't mess with any of the pools
-#   while it is being processed by other routines. maybe use a pending_freed blocks?
 
 import ..@pool_timeit, ..actual_alloc, ..actual_free
 
@@ -146,29 +141,25 @@ function scan!(blocks, sz, max_overhead=typemax(Int))
     end
 end
 
-# merge split blocks. happens incrementally as part of `pool_free`,
-# but requires a dedicated pass in case of alloc-heavy workloads.
-function compact!(blocks)
+function incremental_compact!(blocks)
+    compacted = 0
     lock(pool_lock) do
-        # find the unallocated head nodes
-        candidates = Set{Block}()
         for block in blocks
-            if block.state == AVAILABLE
-                # get the first unallocated node in a chain
-                while block.prev !== nothing && block.prev.state == AVAILABLE
-                    block = block.prev
-                end
-                push!(candidates, block)
-            end
-        end
+            szclass = size_class(sizeof(block))
+            available = (available_small, available_large, available_huge)[szclass]
 
-        for head in candidates
+            # get the first unallocated node in a chain
+            head = block
+            while head.prev !== nothing && head.prev.state == AVAILABLE
+                head = head.prev
+            end
+
             # construct a chain of unallocated blocks
             chain = [head]
             let block = head
                 while block.next !== nothing && block.next.state == AVAILABLE
                     block = block.next
-                    @assert block in blocks
+                    @assert block in available
                     push!(chain, block)
                 end
             end
@@ -176,15 +167,16 @@ function compact!(blocks)
             # compact the chain into a single block
             if length(chain) > 1
                 for block in chain
-                    delete!(blocks, block)
+                    delete!(available, block)
                 end
                 block = merge!(chain...)
-                push!(blocks, block)
+                @assert !in(block, available) "Collision in the available memory pool"
+                push!(available, block)
+                compacted += length(chain) - 1
             end
         end
     end
-
-    return
+    return compacted
 end
 
 # TODO: partial reclaim on ordered list?
@@ -210,6 +202,17 @@ function reclaim!(blocks, sz)
     return freed
 end
 
+function repopulate!(blocks)
+    lock(pool_lock) do
+        for block in blocks
+            szclass = size_class(sizeof(block))
+            available = (available_small, available_large, available_huge)[szclass]
+            @assert !in(block, available) "Collision in the available memory pool"
+            push!(available, block)
+        end
+    end
+end
+
 const SMALL = 1
 const LARGE = 2
 const HUGE  = 3
@@ -225,6 +228,7 @@ const available_small = SortedSet{Block}(UniqueIncreasingSize)
 const available_large = SortedSet{Block}(UniqueIncreasingSize)
 const available_huge  = SortedSet{Block}(UniqueIncreasingSize)
 const allocated = Dict{Mem.Buffer,Block}()
+const freed = Vector{Block}()
 
 function size_class(sz)
     if sz <= SMALL_CUTOFF
@@ -259,32 +263,32 @@ function pool_alloc(sz)
            @pool_timeit "$phase.0 gc(true)" GC.gc(true)
         end
 
-        @pool_timeit "$phase.1 scan" begin
+        if !isempty(freed)
+            @pool_timeit "$phase.1 repopulate + compact" begin
+                # `freed` may be modified concurrently, so take a copy
+                pending = copy(freed)
+                empty!(freed)
+
+                repopulate!(pending)
+                incremental_compact!(pending)
+            end
+        end
+
+        @pool_timeit "$phase.2 scan" begin
             block = scan!(available, sz, max_overhead)
         end
         block === nothing || break
 
-        @pool_timeit "$phase.2 alloc" begin
+        @pool_timeit "$phase.3 alloc" begin
             buf = actual_alloc(sz)
             block = buf === nothing ? nothing : Block(buf)
         end
         block === nothing || break
 
-        if szclass != HUGE
-            @pool_timeit "$phase.3 compact + scan" begin
-                compact!(available)
-                block = scan!(available, sz, max_overhead)
-            end
-            block === nothing || break
-        end
-
         @pool_timeit "$phase.4 reclaim + alloc" begin
             reclaim!(available_small, sz)
-            compact!(available_large)       # TODO: make this incremental
             reclaim!(available_large, sz)
-            compact!(available_huge)        # TODO: make this incremental
             reclaim!(available_huge, sz)
-            # TODO: once incremental, have compact return bool if something happened, and check that it is false
             buf = actual_alloc(sz)
             block = buf === nothing ? nothing : Block(buf)
         end
@@ -312,43 +316,7 @@ end
 
 function pool_free(block)
     block.state = AVAILABLE
-
-    szclass = size_class(sizeof(block))
-    available = (available_small, available_large, available_huge)[szclass]
-    @assert !in(block, available) "Collision in the available memory pool"
-    push!(available, block)
-
-    # incremental block merging
-    # NOTE: requires a spinlock, because finalizer are executed in the same task as the rest
-    #       of the application (i.e., a reentrant lock will not prevent us from messing up
-    #       state while being held by e.g. `scan!()`)
-    if !islocked(pool_lock)
-        lock(pool_lock) do
-            # specialized version of `compact!()`
-            ## get the first unallocated node in a chain
-            head = block
-            while head.prev !== nothing && head.prev.state == AVAILABLE
-                head = head.prev
-            end
-            ## construct a chain of unallocated blocks
-            chain = [head]
-            let block = head
-                while block.next !== nothing && block.next.state == AVAILABLE
-                    block = block.next
-                    @assert block in available
-                    push!(chain, block)
-                end
-            end
-            ## compact the chain into a single block
-            if length(chain) > 1
-                for block in chain
-                    delete!(available, block)
-                end
-                block = merge!(chain...)
-                push!(available, block)
-            end
-        end
-    end
+    push!(freed, block)
 end
 
 
@@ -359,9 +327,10 @@ init() = return
 function deinit()
     @assert isempty(allocated) "Cannot deinitialize memory pool with outstanding allocations"
 
-    for available in (available_small, available_large)
-        compact!(available)
+    incremental_compact!(freed)
+    @assert isempty(freed)
 
+    for available in (available_small, available_large, available_huge)
         while !isempty(available)
             block = pop!(available)
             actual_free(block)
