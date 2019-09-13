@@ -104,8 +104,8 @@ const requested = Dict{Mem.Buffer,Int}()
   end
   if buf === nothing
     @error "Out of GPU memory trying to allocate $(Base.format_bytes(sz))"
-    memory_status()
     pool[].dump()
+    memory_status()
     throw(OutOfMemoryError())
   end
 
