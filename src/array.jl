@@ -378,8 +378,9 @@ function Base.reverse(input::CuArray{T, N}; dims::Integer) where {T, N}
         index_in = offset_in + threadIdx().x
 
         # the index of an element in the original array along dimension that we will flip
-        ik = ((UInt32(ceil(index_in / numelemsinprevdims)) - 1) % numelemsincurrdim) + 1
-        index_out = UInt32(index_in + (numelemsincurrdim - 2ik + 1) * numelemsinprevdims)
+        ik = ((ceil(Int, index_in / numelemsinprevdims) - 1) % numelemsincurrdim) + 1
+
+        index_out = index_in + (numelemsincurrdim - 2ik + 1) * numelemsinprevdims
 
         if 1 ≤ index_in ≤ length(input) && 1 ≤ index_out ≤ length(output)
             @inbounds output[index_out] = input[index_in]
