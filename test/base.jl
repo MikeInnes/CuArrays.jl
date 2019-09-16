@@ -338,26 +338,10 @@ end
     @test testf(x->reverse!(x), rand(1000))
     @test testf(x->reverse!(x, 10), rand(1000))
     @test testf(x->reverse!(x, 10, 90), rand(1000))
-end
 
-reverse_testset = [
-  [1, 2, 4, 3],
-  [4, 2],
-  [5],
-  [2^5, 2^5, 2^5]
-]
-
-@testset "reverse with CuArrays" begin
-      for testshape ∈ reverse_testset
-        a_h = Float32.(reshape(Vector(1:prod(testshape)), testcase...))
-        a_d = cu(a)
-        b_d = similar(a_d)
-
-        for dims=1:length(testshape)
-          b_h = reverse(a_h, dims=dims)
-          reverse!(a_d, b_d, dims=dims)
-          @test all(cu(b_h) .== b_d)
-        end
+    for shape in ([1, 2, 4, 3], [4, 2], [5], [2^5, 2^5, 2^5]),
+        dim in 1:length(shape)
+      @test testf(x->reverse(x; dims=dim), rand(shape...))
     end
 end
 
