@@ -280,104 +280,118 @@ end
 
 ## reversing
 
-# with `start`/`stop` arguments
+# 1-dimensional
 
-function _reverse(input::CuVector{T}, output::CuVector{T}) where {T}
-    @assert length(input) == length(output)
+# in-place, using shared memory to temporarily store values
+function Base.reverse!(data::CuVector{T}, start=1, stop=length(data)) where {T}
+    range = start:stop
 
-    nthreads = 256
-    nblocks = ceil(Int, length(input) / nthreads)
-    shmem = nthreads * sizeof(T)
-
-    function kernel(input::CuDeviceVector{T}, output::CuDeviceVector{T}) where {T}
+    function kernel(data::CuDeviceVector{T}, range::UnitRange) where {T}
         shared = @cuDynamicSharedMem(T, blockDim().x)
 
         # load one element per thread from device memory and buffer it in reversed order
 
-        offset_in = blockDim().x * (blockIdx().x - 1)
+        offset_in = first(range) + blockDim().x * (blockIdx().x - 1) - 1
         index_in = offset_in + threadIdx().x
 
-        if index_in <= length(input)
+        if index_in <= last(range)
             index_shared = blockDim().x - threadIdx().x + 1
-            @inbounds shared[index_shared] = input[index_in]
+            @inbounds shared[index_shared] = data[index_in]
         end
 
         sync_threads()
 
         # write back in forward order, but to the reversed block offset as before
 
-        offset_out = length(output) -  blockDim().x * blockIdx().x
+        offset_out = last(range) - blockDim().x * blockIdx().x
         index_out = offset_out + threadIdx().x
 
-        if 1 <= index_out <= length(output)
+        if index_out in range
             index_shared = threadIdx().x
-            @inbounds output[index_out] = shared[index_shared]
+            @inbounds data[index_out] = shared[index_shared]
         end
 
         return
     end
 
-    @cuda threads=nthreads blocks=nblocks shmem=shmem kernel(input, output)
+    nthreads = 256
+    nblocks = ceil(Int, length(range) / nthreads)
+    shmem = nthreads * sizeof(T)
 
-    return
+    @cuda threads=nthreads blocks=nblocks shmem=shmem kernel(data, range)
+
+    return data
 end
 
-function Base.reverse!(v::CuVector, start=1, stop=length(v))
-    v′ = view(v, start:stop)
-    _reverse(v′, v′)
-    return v
+# out-of-place
+function Base.reverse(input::CuVector{T}, start=1, stop=length(input)) where {T}
+    range = start:stop
+
+    output = similar(input)
+    start > 1 && copyto!(output, 1, input, 1, start-1)
+    stop < length(input) && copyto!(output, stop+1, input, stop+1)
+
+    function kernel(input::CuDeviceVector{T}, output::CuDeviceVector{T}, range::UnitRange) where {T}
+        index = (blockIdx().x - 1) * blockDim().x + threadIdx().x
+
+        index_in = first(range) + index - 1
+        index_out = last(range) - index + 1
+
+        if index_in <= last(range)
+            @inbounds output[index_out] = input[index_in]
+        end
+
+        return
+    end
+
+    nthreads = 256
+    nblocks = ceil(Int, length(range) / nthreads)
+    shmem = nthreads * sizeof(T)
+
+    @cuda threads=nthreads blocks=nblocks shmem=shmem kernel(input, output, range)
+
+    return output
 end
 
-function Base.reverse(v::CuVector, start=1, stop=length(v))
-    v′ = similar(v)
-    start > 1 && copyto!(v′, 1, v, 1, start-1)
-    _reverse(view(v, start:stop), view(v′, start:stop))
-    stop < length(v) && copyto!(v′, stop+1, v, stop+1)
-    return v′
-end
+# n-dimensional
 
-# with `dims` argument
-
-function Base.reverse!(input::CuArray{T, N}, output::CuArray{T, N}; dims::Integer) where {T, N}
+function Base.reverse(input::CuArray{T, N}; dims::Integer) where {T, N}
     if !(1 ≤ dims ≤ length(size(input)))
       ArgumentError("dimension $dims is not 1 ≤ $dims ≤ $length(size(input))")
     end
 
-    if !all(size(input) .== size(output))
-      DimensionMismatch("input and output arrays are not of the same dimensions.")
-    end
-
-    nthreads = 256
-    nblocks = ceil(Int, length(input)/nthreads)
+    output = similar(input)
 
     shape = [size(input)...]
-
     numelemsinprevdims = prod(shape[1:dims-1])
     numelemsincurrdim = shape[dims]
 
     function kernel(input::CuDeviceArray{T, N}, output::CuDeviceArray{T, N}) where {T, N}
-        # The plan is to treat an ND Array as a 1D Array. An element at pos
-        # [i1, i2, i3, ... , i{x}, ..., i{n}], after reversing about the xth
-        # dimension, will be at [i1, i2, i3, ... , d{x} - i{x} + 1, ..., i{n}],
-        # where d_{x} is the size of the xth dimension. We use this information
-        # to find the location of the original element in 1D representation of the
-        # flipped array. ik is the index of an element in the original array along
-        # dimension that we will flip.
+        # treat an ND array as 1D
+        #
+        # after reversing by the xth dimension an element at pos
+        # [i1, i2, i3, ... , i{x},            ..., i{n}] will be at
+        # [i1, i2, i3, ... , d{x} - i{x} + 1, ..., i{n}], where
+        # d{x} is the size of the xth dimension
+
         offset_in = blockDim().x * (blockIdx().x - 1)
         index_in = offset_in + threadIdx().x
+
+        # the index of an element in the original array along dimension that we will flip
         ik = ((UInt32(ceil(index_in / numelemsinprevdims)) - 1) % numelemsincurrdim) + 1
         index_out = UInt32(index_in + (numelemsincurrdim - 2ik + 1) * numelemsinprevdims)
 
         if 1 ≤ index_in ≤ length(input) && 1 ≤ index_out ≤ length(output)
             @inbounds output[index_out] = input[index_in]
         end
+
         return
     end
-    @cuda threads=nthreads blocks=nblocks kernel(input, output)
-end
 
-function Base.reverse(input::CuArray{T, N}; dims::Integer) where {T, N}
-    output = similar(input)
-    reverse!(input, output; dims=dims)
+    nthreads = 256
+    nblocks = ceil(Int, length(input)/nthreads)
+
+    @cuda threads=nthreads blocks=nblocks kernel(input, output)
+
     return output
 end

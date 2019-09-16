@@ -331,14 +331,17 @@ end
 end
 
 @testset "reverse" begin
+    # 1-d out-of-place
     @test testf(x->reverse(x), rand(1000))
     @test testf(x->reverse(x, 10), rand(1000))
     @test testf(x->reverse(x, 10, 90), rand(1000))
 
+    # 1-d in-place
     @test testf(x->reverse!(x), rand(1000))
     @test testf(x->reverse!(x, 10), rand(1000))
     @test testf(x->reverse!(x, 10, 90), rand(1000))
 
+    # n-d out-of-place
     for shape in ([1, 2, 4, 3], [4, 2], [5], [2^5, 2^5, 2^5]),
         dim in 1:length(shape)
       @test testf(x->reverse(x; dims=dim), rand(shape...))
