@@ -143,7 +143,7 @@ function __init_memory__()
         SimplePool
       elseif ENV["CUARRAYS_MEMORY_POOL"] == "split"
         SplittingPool
-      elseif ENV["CUARRAYS_MEMORY_POOL"] == "dummy"
+      elseif ENV["CUARRAYS_MEMORY_POOL"] == "none"
         DummyPool
       else
         error("Invalid allocator selected")
