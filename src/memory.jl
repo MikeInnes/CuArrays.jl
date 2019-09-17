@@ -285,3 +285,5 @@ function memory_status()
 end
 
 pool_timings() = (show(pool_to; allocations=false, sortby=:name); println())
+
+pool_dump() = pool[].dump()
