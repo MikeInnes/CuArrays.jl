@@ -290,6 +290,45 @@ end
 
 # in-place version, using shared memory to buffer temporary values
 function reverse_by_moving(data::CuArray{T, N}, dims::Integer=1) where {T, N}
+    shape = [size(data)...]
+    numelemsinprevdims = prod(shape[1:dims-1])
+    numelemsincurrdim = shape[dims]
+
+    function kernel(data::CuDeviceArray{T, N}) where {T, N}
+        #@cuprintf("%ld  %ld %ld\n", threadIdx().x, blockIdx().x, blockDim().x)
+
+        #shared = @cuDynamicSharedMem(T, blockDim().x)
+
+        # Each thread is responsible for swapping an element with another element
+        # that is currently in its destination position.
+
+        # Copy the block as is into shared memory...
+        offset_in = blockDim().x * (blockIdx().x - 1)
+        index_in  = offset_in + threadIdx().x
+
+        # Calculate the index of the new position...
+        ik = ((ceil(Int, index_in / numelemsinprevdims) - 1) % numelemsincurrdim) + 1
+        index_out = index_in + (numelemsincurrdim - 2ik + 1) * numelemsinprevdims
+
+        # And hit swap!
+        @inbounds temp = data[index_in]
+        @inbounds data[index_in] = data[index_out]
+        @inbounds data[index_out] = temp
+
+        return nothing
+    end
+
+    nthreads = 256
+    nblocks = ceil(Int, length(data) / nthreads)
+    #shmem = nthreads * sizeof(T)
+
+    CuArrays.@sync begin
+        @cuda threads=nthreads blocks=nblocks kernel(data)
+    end
+end
+
+#=
+function reverse_by_moving(data::CuArray{T, N}, dims::Integer=1) where {T, N}
     @assert dims == 1
     # TODO: generalize to ND
 
@@ -331,7 +370,7 @@ function reverse_by_moving(data::CuArray{T, N}, dims::Integer=1) where {T, N}
 
     @cuda threads=nthreads blocks=nblocks shmem=shmem kernel(data)
 end
-
+=#
 # out-of-place version
 function reverse_by_copying(input::CuArray{T, N}, output::CuArray{T, N},
                             dims::Integer=1) where {T, N}
@@ -380,8 +419,14 @@ function Base.reverse(input::CuArray{T, N}; dims::Integer) where {T, N}
     return output
 end
 
-# TODO: in-place
-
+# in-place
+function Base.reverse!(input::CuArray{T, N}; dims::Integer) where {T, N}
+    if !(1 ≤ dims ≤ length(size(input)))
+        ArgumentError("dimension $dims is not 1 ≤ $dims ≤ $length(size(input))")
+    end
+    reverse_by_moving(input, dims)
+    return input
+end
 
 # 1-dimensional API
 

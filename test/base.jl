@@ -339,6 +339,14 @@ end
     for shape in ([1, 2, 4, 3], [4, 2], [5], [2^5, 2^5, 2^5]),
         dim in 1:length(shape)
       @test testf(x->reverse(x; dims=dim), rand(shape...))
+
+      # TODO: Better tests for inplace ND reverse
+      # Reverse an array twice and see if it's still the same array...
+      x_h = rand(shape...)
+      x_d = cu(x_d)
+      reverse!(x_d, dim)
+      reverse!(x_d, dim)
+      @test all(cu(x_h) .== x_d)
     end
 end
 
