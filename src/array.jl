@@ -288,7 +288,7 @@ end
 # pos [i1, i2, i3, ... , d{x} - i{x} + 1, ..., i{n}], where d{x} is the size of the xth
 # dimension.
 
-# in-place version, using shared memory to buffer temporary values
+# in-place version
 function reverse_by_moving(data::CuArray{T, N}, dims::Integer=1) where {T, N}
     shape = [size(data)...]
     numelemsinprevdims = prod(shape[1:dims-1])
@@ -302,11 +302,11 @@ function reverse_by_moving(data::CuArray{T, N}, dims::Integer=1) where {T, N}
         # Each thread is responsible for swapping an element with another element
         # that is currently in its destination position.
 
-        # Copy the block as is into shared memory...
+        # Calculate the index of the element to swapped.
         offset_in = blockDim().x * (blockIdx().x - 1)
         index_in  = offset_in + threadIdx().x
 
-        # Calculate the index of the new position...
+        # Calculate its destination...
         ik = ((ceil(Int, index_in / numelemsinprevdims) - 1) % numelemsincurrdim) + 1
         index_out = index_in + (numelemsincurrdim - 2ik + 1) * numelemsinprevdims
 
