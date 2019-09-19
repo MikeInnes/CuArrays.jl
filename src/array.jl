@@ -322,9 +322,7 @@ function reverse_by_moving(data::CuArray{T, N}, dims::Integer=1) where {T, N}
     nblocks = ceil(Int, length(data) / nthreads)
     #shmem = nthreads * sizeof(T)
 
-    CuArrays.@sync begin
-        @cuda threads=nthreads blocks=nblocks kernel(data)
-    end
+    @cuda threads=nthreads blocks=nblocks kernel(data)
 end
 
 #=
