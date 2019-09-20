@@ -343,7 +343,7 @@ end
       # TODO: Better tests for inplace ND reverse
       # Reverse an array twice and see if it's still the same array...
       x_h = rand(shape...)
-      x_d = cu(x_d)
+      x_d = cu(x_h)
       reverse!(x_d, dim)
       reverse!(x_d, dim)
       @test all(cu(x_h) .== x_d)
