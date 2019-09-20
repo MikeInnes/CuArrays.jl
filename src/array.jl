@@ -297,32 +297,37 @@ function reverse_by_moving(data::CuArray{T, N}, dims::Integer=1) where {T, N}
     function kernel(data::CuDeviceArray{T, N}) where {T, N}
         #@cuprintf("%ld  %ld %ld\n", threadIdx().x, blockIdx().x, blockDim().x)
 
-        #shared = @cuDynamicSharedMem(T, blockDim().x)
+        shared = @cuDynamicSharedMem(T, blockDim().x)
 
-        # Each thread is responsible for swapping an element with another element
-        # that is currently in its destination position.
+        # Each thread is responsible for shifting one element.
 
-        # Calculate the index of the element to swapped.
+        # Copy the block as is into shared memory.
         offset_in = blockDim().x * (blockIdx().x - 1)
         index_in  = offset_in + threadIdx().x
 
-        # Calculate its destination...
+        if index_in ≤ length(data)
+            index_shared = threadIdx().x
+            @inbounds shared[index_shared] = data[index_in]
+        end
+
+        sync_threads()
+
+        # Calculate the index of the new position.
         ik = ((ceil(Int, index_in / numelemsinprevdims) - 1) % numelemsincurrdim) + 1
         index_out = index_in + (numelemsincurrdim - 2ik + 1) * numelemsinprevdims
 
-        # And hit swap!
-        @inbounds temp = data[index_in]
-        @inbounds data[index_in] = data[index_out]
-        @inbounds data[index_out] = temp
+        # Move the values...
+        if 1 ≤ index_out ≤ length(data)
+            @inbounds data[index_out] = shared[index_shared]
+        end
 
         return nothing
     end
 
     nthreads = 256
     nblocks = ceil(Int, length(data) / nthreads)
-    #shmem = nthreads * sizeof(T)
-
-    @cuda threads=nthreads blocks=nblocks kernel(data)
+    shmem = nthreads * sizeof(T)
+    @cuda threads=nthreads blocks=nblocks shmem=shmem kernel(data)
 end
 
 #=
