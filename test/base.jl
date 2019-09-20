@@ -345,6 +345,11 @@ end
     for shape in ([1, 2, 4, 3], [4, 2], [5], [2^5, 2^5, 2^5]),
         dim in 1:length(shape)
       @test testf(x->reverse(x; dims=dim), rand(shape...))
+
+      cpu = rand(shape...)
+      gpu = CuArray(cpu)
+      reverse!(gpu; dims=dim)
+      @test Array(gpu) == reverse(cpu; dims=dim)
     end
 end
 

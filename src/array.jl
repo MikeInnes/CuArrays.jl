@@ -289,14 +289,11 @@ end
 
 # in-place version, using shared memory to buffer temporary values
 function reverse_by_moving(data::CuArray{T, N}, dims::Integer=1) where {T, N}
-    @assert dims == 1
-    # TODO: generalize to ND
-
     shape = [size(data)...]
     numelemsinprevdims = prod(shape[1:dims-1])
     numelemsincurrdim = shape[dims]
 
-    function kernel(data::CuDeviceVector{T}) where {T}
+    function kernel(data::CuDeviceArray{T, N}) where {T, N}
         shared = @cuDynamicSharedMem(T, blockDim().x)
 
         # load one element per thread from device memory and buffer it in reversed order
@@ -305,7 +302,7 @@ function reverse_by_moving(data::CuArray{T, N}, dims::Integer=1) where {T, N}
         index_in = offset_in + threadIdx().x
 
         if index_in <= length(data)
-            index_shared = blockDim().x - threadIdx().x + 1
+            index_shared = threadIdx().x
             @inbounds shared[index_shared] = data[index_in]
         end
 
@@ -313,8 +310,8 @@ function reverse_by_moving(data::CuArray{T, N}, dims::Integer=1) where {T, N}
 
         # write back in forward order, but to the reversed block offset as before
 
-        offset_out = length(data) - blockDim().x * blockIdx().x
-        index_out = offset_out + threadIdx().x
+        ik = ((ceil(Int, index_in / numelemsinprevdims) - 1) % numelemsincurrdim) + 1
+        index_out = index_in + (numelemsincurrdim - 2ik + 1) * numelemsinprevdims
 
         if 1 <= index_out <= length(data)
             index_shared = threadIdx().x
@@ -367,6 +364,17 @@ end
 
 # n-dimensional API
 
+# in-place
+function Base.reverse!(data::CuArray{T, N}; dims::Integer) where {T, N}
+    if !(1 ≤ dims ≤ length(size(data)))
+      ArgumentError("dimension $dims is not 1 ≤ $dims ≤ $length(size(input))")
+    end
+
+    reverse_by_moving(data, dims)
+
+    return data
+end
+
 # out-of-place
 function Base.reverse(input::CuArray{T, N}; dims::Integer) where {T, N}
     if !(1 ≤ dims ≤ length(size(input)))
@@ -378,8 +386,6 @@ function Base.reverse(input::CuArray{T, N}; dims::Integer) where {T, N}
 
     return output
 end
-
-# TODO: in-place
 
 
 # 1-dimensional API
