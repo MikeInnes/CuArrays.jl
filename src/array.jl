@@ -282,12 +282,11 @@ end
 
 # n-dimensional kernels
 
-# they work by treating the array as 1d. after reversing by the xth dimension an element at
+# the kernel works by treating the array as 1d. after reversing by dimension x an element at
 # pos [i1, i2, i3, ... , i{x},            ..., i{n}] will be at
-# pos [i1, i2, i3, ... , d{x} - i{x} + 1, ..., i{n}], where d{x} is the size of the xth
-# dimension.
+# pos [i1, i2, i3, ... , d{x} - i{x} + 1, ..., i{n}] where d{x} is the size of dimension x
 
-# in-place version, using shared memory to buffer temporary values
+# in-place version
 function reverse_by_moving(data::CuArray{T, N}, dims::Integer=1) where {T, N}
     shape = [size(data)...]
     numelemsinprevdims = prod(shape[1:dims-1])
@@ -302,16 +301,24 @@ function reverse_by_moving(data::CuArray{T, N}, dims::Integer=1) where {T, N}
         index_in = offset_in + threadIdx().x
 
         if index_in <= length(data)
-            index_shared = threadIdx().x
+            index_shared = blockDim().x - threadIdx().x + 1
             @inbounds shared[index_shared] = data[index_in]
         end
 
         sync_threads()
 
-        # write back in forward order, but to the reversed block offset as before
+        # write back in reverse from the buffer (for 1D arrays, this will be in forward
+        # order, enabling memory coalescing)
 
-        ik = ((ceil(Int, index_in / numelemsinprevdims) - 1) % numelemsincurrdim) + 1
-        index_out = index_in + (numelemsincurrdim - 2ik + 1) * numelemsinprevdims
+        # since we're reading from the buffer in reverse order, we'll be using a value that
+        # has been stored there by another thread. compute its origin index to figure out
+        # the destination index
+        other_index_in = offset_in + blockDim().x - threadIdx().x + 1
+
+        # the index of an element in the original array along dimension that we will flip
+        ik = ((ceil(Int, other_index_in / numelemsinprevdims) - 1) % numelemsincurrdim) + 1
+
+        index_out = other_index_in + (numelemsincurrdim - 2ik + 1) * numelemsinprevdims
 
         if 1 <= index_out <= length(data)
             index_shared = threadIdx().x
