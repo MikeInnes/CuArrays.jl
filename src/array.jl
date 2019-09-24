@@ -284,53 +284,79 @@ end
 # pos [i1, i2, i3, ... , i{x},            ..., i{n}] will be at
 # pos [i1, i2, i3, ... , d{x} - i{x} + 1, ..., i{n}] where d{x} is the size of dimension x
 
-function _reverse(input::CuArray{T, N}, output::CuArray{T, N}=input; dims::Integer=1) where {T, N}
+# out-of-place version, copying a single value per thread from input to output
+function _reverse(input::CuArray{T, N}, output::CuArray{T, N}; dims::Integer=1) where {T, N}
     @assert size(input) == size(output)
     shape = [size(input)...]
     numelemsinprevdims = prod(shape[1:dims-1])
     numelemsincurrdim = shape[dims]
 
     function kernel(input::CuDeviceArray{T, N}, output::CuDeviceArray{T, N}) where {T, N}
-        shared = @cuDynamicSharedMem(T, blockDim().x)
-
-        # load one element per thread from device memory and buffer it in reversed order
-
         offset_in = blockDim().x * (blockIdx().x - 1)
+
         index_in = offset_in + threadIdx().x
 
         if index_in <= length(input)
-            index_shared = blockDim().x - threadIdx().x + 1
-            @inbounds shared[index_shared] = input[index_in]
-        end
+            element = @inbounds input[index_in]
 
-        sync_threads()
+            # the index of an element in the original array along dimension that we will flip
+            #assume(numelemsinprevdims > 0)
+            #assume(numelemsincurrdim > 0)
+            ik = ((cld(index_in, numelemsinprevdims) - 1) % numelemsincurrdim) + 1
 
-        # write back in reverse from the buffer (for 1D arrays, this will be in forward
-        # order, enabling memory coalescing)
+            index_out = index_in + (numelemsincurrdim - 2ik + 1) * numelemsinprevdims
 
-        # since we're reading from the buffer in reverse order, we'll be using a value that
-        # has been stored there by another thread. compute its origin index to figure out
-        # the destination index
-        other_index_in = offset_in + blockDim().x - threadIdx().x + 1
-
-        # the index of an element in the original array along dimension that we will flip
-        ik = ((ceil(Int, other_index_in / numelemsinprevdims) - 1) % numelemsincurrdim) + 1
-
-        index_out = other_index_in + (numelemsincurrdim - 2ik + 1) * numelemsinprevdims
-
-        if 1 <= index_out <= length(output)
-            index_shared = threadIdx().x
-            @inbounds output[index_out] = shared[index_shared]
+            @inbounds output[index_out] = element
         end
 
         return
     end
 
     nthreads = 256
-    nblocks = ceil(Int, prod(shape) / nthreads)
+    nblocks = cld(prod(shape), nthreads)
     shmem = nthreads * sizeof(T)
 
-    @cuda threads=nthreads blocks=nblocks shmem=shmem kernel(input, output)
+    @cuda threads=nthreads blocks=nblocks kernel(input, output)
+end
+
+# in-place version, swapping two elements on half the number of threads
+function _reverse(data::CuArray{T, N}; dims::Integer=1) where {T, N}
+    shape = [size(data)...]
+    numelemsinprevdims = prod(shape[1:dims-1])
+    numelemsincurrdim = shape[dims]
+
+    function kernel(data::CuDeviceArray{T, N}) where {T, N}
+        offset_in = blockDim().x * (blockIdx().x - 1)
+
+        index_in = offset_in + threadIdx().x
+
+        # the index of an element in the original array along dimension that we will flip
+        #assume(numelemsinprevdims > 0)
+        #assume(numelemsincurrdim > 0)
+        ik = ((cld(index_in, numelemsinprevdims) - 1) % numelemsincurrdim) + 1
+
+        index_out = index_in + (numelemsincurrdim - 2ik + 1) * numelemsinprevdims
+
+        if index_in <= length(data) && index_in < index_out
+            @inbounds begin
+                temp = data[index_out]
+                data[index_out] = data[index_in]
+                data[index_in] = temp
+            end
+        end
+
+        return
+    end
+
+    # NOTE: we launch twice the number of threads, which is wasteful, but the ND index
+    #       calculations don't allow using only the first half of the threads
+    #       (e.g. [1 2 3; 4 5 6] where threads 1 and 2 swap respectively (1,2) and (2,1)).
+
+    nthreads = 256
+    nblocks = cld(prod(shape), nthreads)
+    shmem = nthreads * sizeof(T)
+
+    @cuda threads=nthreads blocks=nblocks kernel(data)
 end
 
 
