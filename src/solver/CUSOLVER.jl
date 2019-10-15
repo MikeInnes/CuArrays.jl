@@ -1,7 +1,8 @@
 module CUSOLVER
 
 using ..CuArrays
-using ..CuArrays: libcusolver, active_context, _getindex, unsafe_free!
+using ..CuArrays: libcusolver, active_context, unsafe_free!, @sync
+using GPUArrays: _getindex
 
 using ..CUBLAS: cublasFillMode_t, cublasOperation_t, cublasSideMode_t, cublasDiagType_t
 using ..CUSPARSE: cusparseMatDescr_t

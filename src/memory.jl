@@ -50,7 +50,7 @@ function actual_alloc(bytes)
   # try the actual allocation
   try
     alloc_stats.actual_time += Base.@elapsed begin
-      @timeit alloc_to "alloc" buf = Mem.alloc(Mem.Device, bytes)
+      @timeit alloc_to "alloc" buf = Mem.alloc(Mem.Unified, bytes)
     end
     @assert sizeof(buf) == bytes
     alloc_stats.actual_nalloc += 1

@@ -1,13 +1,40 @@
 import GPUArrays: allowscalar, @allowscalar
 
-function _getindex(xs::CuArray{T}, i::Integer) where T
-  buf = Array{T}(undef)
-  copyto!(buf, 1, xs, i, 1)
-  buf[]
+
+## unified memory indexing
+
+# > Simultaneous access to managed memory from the CPU and GPUs of compute capability lower
+# > than 6.0 is not possible. This is because pre-Pascal GPUs lack hardware page faulting,
+# > so coherence can’t be guaranteed. On these GPUs, an access from the CPU while a kernel
+# > is running will cause a segmentation fault.
+#
+# > On Pascal and later GPUs, the CPU and the GPU can simultaneously access managed memory,
+# > since they can both handle page faults; however, it is up to the application developer
+# > to ensure there are no race conditions caused by simultaneous accesses.
+const coherent = Ref(false)
+
+function GPUArrays._getindex(xs::CuArray{T}, i::Integer) where T
+  buf = buffer(xs)
+  if isa(buf, Mem.UnifiedBuffer)
+    coherent[] || CUDAdrv.synchronize()
+    ptr = convert(Ptr{T}, buf)
+    unsafe_load(ptr, i)
+  else
+    val = Array{T}(undef)
+    copyto!(val, 1, xs, i, 1)
+    val[]
+  end
 end
 
-function _setindex!(xs::CuArray{T}, v::T, i::Integer) where T
-  copyto!(xs, i, T[v], 1, 1)
+function GPUArrays._setindex!(xs::CuArray{T}, v::T, i::Integer) where T
+  buf = buffer(xs)
+  if isa(buf, Mem.UnifiedBuffer)
+    coherent[] || CUDAdrv.synchronize()
+    ptr = convert(Ptr{T}, buf)
+    unsafe_store!(ptr, v, i)
+  else
+    copyto!(xs, i, T[v], 1, 1)
+  end
 end
 
 
@@ -17,9 +44,9 @@ Base.getindex(xs::CuArray, bools::AbstractArray{Bool}) = getindex(xs, CuArray(bo
 
 function Base.getindex(xs::CuArray{T}, bools::CuArray{Bool}) where {T}
   bools = reshape(bools, prod(size(bools)))
-  indices = cumsum(bools)  # unique indices for elements that are true
+  indices = @sync cumsum(bools)  # unique indices for elements that are true
 
-  n = _getindex(indices, length(indices))  # number that are true
+  n = GPUArrays._getindex(indices, length(indices))  # number that are true
   ys = CuArray{T}(undef, n)
 
   if n > 0
@@ -55,9 +82,9 @@ end
 ## findall
 
 function Base.findall(bools::CuArray{Bool})
-    indices = cumsum(bools)
+    indices = @sync cumsum(bools)
 
-    n = _getindex(indices, length(indices))
+    n = GPUArrays._getindex(indices, length(indices))
     ys = CuArray{Int}(undef, n)
 
     if n > 0

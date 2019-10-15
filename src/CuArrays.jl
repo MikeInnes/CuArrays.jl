@@ -90,8 +90,8 @@ function __init__()
     # package integrations
     @require ForwardDiff="f6369f11-7733-5829-9624-2563aa707210" include("forwarddiff.jl")
 
-    # update the active context when we switch devices
-    callback = (::CuDevice, ctx::CuContext) -> begin
+    callback = (dev::CuDevice, ctx::CuContext) -> begin
+        # update the active context
         active_context[] = ctx
 
         # wipe the active handles
@@ -103,6 +103,10 @@ function __init__()
         CURAND._generator[] = nothing
         CUDNN._handle[] = C_NULL
         CUTENSOR._handle[] = C_NULL
+
+        # update the coherent memory access indicator
+        coherent[] = CUDAdrv.version() >= v"9.0" &&
+                     attribute(dev, CUDAdrv.CONCURRENT_MANAGED_ACCESS)
     end
     push!(CUDAnative.device!_listeners, callback)
 
