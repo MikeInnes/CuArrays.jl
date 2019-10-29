@@ -4,7 +4,7 @@ using CUDAapi, CUDAdrv, CUDAnative
 
 using GPUArrays
 
-export CuArray, CuVector, CuMatrix, CuVecOrMat, cu
+export CuArray, CuVector, CuMatrix, CuVecOrMat, cu, cuda
 
 import LinearAlgebra
 
@@ -81,6 +81,8 @@ include("dnn/CUDNN.jl")
 include("tensor/CUTENSOR.jl")
 
 include("nnlib.jl")
+
+include("contextual.jl")
 
 include("deprecated.jl")
 
