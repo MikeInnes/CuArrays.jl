@@ -52,6 +52,7 @@ include("rnn.jl")
 
 # interfaces with other software
 include("nnlib.jl")
+include("upsample.jl")
 
 include("compat.jl")
 
