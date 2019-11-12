@@ -34,15 +34,15 @@ version = "1.2.0"
 
 [[CUDAdrv]]
 deps = ["CEnum", "Printf"]
-git-tree-sha1 = "90fa52c4acb2fadf7be48b0d73d9865c16ab9908"
+git-tree-sha1 = "22f2c321e580cab73b8e50e8c17bd3de723afb2b"
 uuid = "c5f51814-7f29-56b8-a69c-e4d8f6be1fde"
-version = "4.0.1"
+version = "4.0.3"
 
 [[CUDAnative]]
 deps = ["Adapt", "CEnum", "CUDAapi", "CUDAdrv", "DataStructures", "InteractiveUtils", "LLVM", "Libdl", "Printf", "TimerOutputs"]
-git-tree-sha1 = "dd642afe5fd6633663a8c3d42f3b7638f2210b79"
+git-tree-sha1 = "86a3165cfe6c7944dc9ba5dd3b703a5a1d7bccab"
 uuid = "be33ccc6-a3ff-5ff2-a52e-74243cff1e17"
-version = "2.5.3"
+version = "2.5.4"
 
 [[Compat]]
 deps = ["Base64", "Dates", "DelimitedFiles", "Distributed", "InteractiveUtils", "LibGit2", "Libdl", "LinearAlgebra", "Markdown", "Mmap", "Pkg", "Printf", "REPL", "Random", "Serialization", "SharedArrays", "Sockets", "SparseArrays", "Statistics", "Test", "UUIDs", "Unicode"]
@@ -50,17 +50,11 @@ git-tree-sha1 = "ed2c4abadf84c53d9e58510b5fc48912c2336fbb"
 uuid = "34da2185-b29b-5c13-b0c7-acf172513d20"
 version = "2.2.0"
 
-[[Crayons]]
-deps = ["Test"]
-git-tree-sha1 = "f621b8ef51fd2004c7cf157ea47f027fdeac5523"
-uuid = "a8cc5b0e-0ffa-5ad4-8c14-923d3ee1735f"
-version = "4.0.0"
-
 [[DataStructures]]
 deps = ["InteractiveUtils", "OrderedCollections"]
-git-tree-sha1 = "0809951a1774dc724da22d26e4289bbaab77809a"
+git-tree-sha1 = "1fe8fad5fc84686dcbc674aa255bc867a64f8132"
 uuid = "864edb3b-99cc-5e75-8d2d-829cb0a9cfe8"
-version = "0.17.0"
+version = "0.17.5"
 
 [[Dates]]
 deps = ["Printf"]
@@ -176,10 +170,10 @@ deps = ["Distributed", "InteractiveUtils", "Logging", "Random"]
 uuid = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [[TimerOutputs]]
-deps = ["Crayons", "Printf", "Test", "Unicode"]
-git-tree-sha1 = "b80671c06f8f8bae08c55d67b5ce292c5ae2660c"
+deps = ["Printf"]
+git-tree-sha1 = "d9c67bd7ac89aafa75037307331d050998bb5a96"
 uuid = "a759f4b9-e2f1-59dc-863e-4aeb61b1ea8f"
-version = "0.5.0"
+version = "0.5.1"
 
 [[Tokenize]]
 git-tree-sha1 = "dfcdbbfb2d0370716c815cbd6f8a364efb6f42cf"
