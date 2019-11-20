@@ -230,8 +230,7 @@ function contraction!(
     alignmentRequirementC = Ref{UInt32}(C_NULL) #TODO init?
     cutensorGetAlignmentRequirement(handle(), C, descC, alignmentRequirementC)
 
-    #desc = Ref{cutensorContractionDescriptor_t}(C_NULL) #TODO init?
-    desc = Ref{cutensorContractionDescriptor_t}(cutensorContractionDescriptor_t(ntuple(i->0,512))) #TODO init?
+    desc = Ref{cutensorContractionDescriptor_t}(cutensorContractionDescriptor_t(ntuple(i->Int64(0),256))) #TODO init?
     cutensorInitContractionDescriptor(handle(),
                                       desc,
                    descA, modeA, alignmentRequirementA[],
@@ -240,14 +239,14 @@ function contraction!(
                    descC, modeC, alignmentRequirementC[],
                    computeType)
 
-    find = Ref{cutensorContractionFind_t}(cutensorContractionFind_t(ntuple(i->0,512))) #TODO init?
+    find = Ref{cutensorContractionFind_t}(cutensorContractionFind_t(ntuple(i->Int64(0),64))) #TODO init?
     cutensorInitContractionFind(handle(), find, algo)
 
     workspaceSize = Ref{UInt64}(C_NULL)
     cutensorContractionGetWorkspace(handle(), desc, find, pref, workspaceSize)
 
-    plan = Ref(cutensorContractionPlan_t(ntuple(i->0, 512))) #TODO init?
-    cutensorInitContractionPlan(handle(), desc, find, workspaceSize[], plan)
+    plan = Ref(cutensorContractionPlan_t(ntuple(i->Int64(0), 640))) #TODO init?
+    cutensorInitContractionPlan(handle(), plan, desc, find, workspaceSize[])
 
     workspace = CuArray{UInt8}(undef, 0)
     try
