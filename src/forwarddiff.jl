@@ -37,9 +37,20 @@ ForwardDiff.DiffRules.DEFINED_DIFFRULES[(:CUDAnative, :abs, 1)] = x ->
    :(signbit(x) ? -one(x) : one(x))
 eval(ForwardDiff.unary_dual_definition(:CUDAnative, :abs))
 
+# byhand: lgamma
+ForwardDiff.DiffRules.@define_diffrule CuArrays.lgamma(a) = :(CuArrays.digamma($a))
+eval(ForwardDiff.unary_dual_definition(:CuArrays, :lgamma))
 
-ForwardDiff.DiffRules.DEFINED_DIFFRULES[(:CUDAnative, :pow, 2)] = (x, y) ->
-  replace_device.(ForwardDiff.DiffRules.DEFINED_DIFFRULES[(:Base, :^, 2)](x, y))
+# byhand: digamma
+ForwardDiff.DiffRules.@define_diffrule CuArrays.digamma(a) = :(CuArrays.trigamma($a))
+eval(ForwardDiff.unary_dual_definition(:CuArrays, :digamma))
+
+# byhand: lbeta
+ForwardDiff.DiffRules.@define_diffrule CuArrays.lbeta(a, b) = :(CuArrays.digamma($a) - CuArrays.digamma($a + $b)), :(CuArrays.digamma($b) - CuArrays.digamma($a + $b))
+eval(ForwardDiff.binary_dual_definition(:CuArrays, :lbeta))
+
+ForwardDiff.DiffRules.DEFINED_DIFFRULES[(:CUDAnative, :pow, 2)] = 
+  (x, y) -> replace_device.(ForwardDiff.DiffRules.DEFINED_DIFFRULES[(:Base, :^, 2)](x, y))
 
 @eval begin
   ForwardDiff.@define_binary_dual_op(

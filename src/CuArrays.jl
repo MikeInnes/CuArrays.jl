@@ -7,7 +7,7 @@ using GPUArrays
 export CuArray, CuVector, CuMatrix, CuVecOrMat, cu
 export CUBLAS, CUSPARSE, CUSOLVER, CUFFT, CURAND, CUDNN, CUTENSOR
 
-import LinearAlgebra
+import LinearAlgebra, SpecialFunctions
 
 using Adapt
 
@@ -24,6 +24,7 @@ include("subarray.jl")
 include("permuteddimsarray.jl")
 include("utils.jl")
 include("indexing.jl")
+include("special/gamma.jl")
 include("broadcast.jl")
 include("matmul.jl")
 include("mapreduce.jl")
