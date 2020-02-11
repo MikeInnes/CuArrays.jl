@@ -18,6 +18,11 @@ import NNlib
 
 const libcudnn = Ref("libcudnn")
 
+# control of deterministic
+const deterministic = Ref(true)
+isdeterministic() = deterministic[]
+deterministic!(flag = true) = (deterministic[] = flag)
+
 # core library
 include("libcudnn_common.jl")
 include("error.jl")

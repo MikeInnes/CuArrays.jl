@@ -50,8 +50,17 @@ function conv!(y::CuArray{T}, x::CuArray{T}, w::CuArray{T}, cdims::DenseConvDims
   cudnnConvolutionForward(y, x, w, cdims, alpha=alpha, algo=algo)
 end
 
+# Reference for deterministic algo:
+# https://docs.nvidia.com/deeplearning/sdk/cudnn-developer-guide/index.html#cudnnConvolutionBackwardFilter
 function ∇conv_filter!(dw::CuArray{T}, x::CuArray{T}, dy::CuArray{T},
-                       cdims::DenseConvDims; alpha=1, algo=0) where T<:CUDNNFloat
+                       cdims::DenseConvDims; alpha=1, algo=isdeterministic() ? 1 : 0) where T<:CUDNNFloat
+  if isdeterministic()
+    if algo == 0
+      @warn "algorithm 0 (CUDNN_CONVOLUTION_BWD_FILTER_ALGO_0) is not deterministic; algorithm 1 is used instead"
+      algo = 1
+    end
+  end
+
   if version() < v"6"
     all(x -> x == 1, dilation(cdims)) || error("Only dilation = 1 is supported in cuDNN version < 6")
   end
@@ -59,8 +68,16 @@ function ∇conv_filter!(dw::CuArray{T}, x::CuArray{T}, dy::CuArray{T},
   cudnnConvolutionBackwardFilter(dw, x, dy, cdims, alpha=alpha, algo=algo)
 end
 
+# Reference for deterministic algo:
+# https://docs.nvidia.com/deeplearning/sdk/cudnn-developer-guide/index.html#cudnnConvolutionBackwardData
 function ∇conv_data!(dx::CuArray{T}, dy::CuArray{T}, w::CuArray{T},
-                     cdims::DenseConvDims; alpha=1, algo=0) where T<:CUDNNFloat
+                     cdims::DenseConvDims; alpha=1, algo=isdeterministic() ? 1 : 0) where T<:CUDNNFloat
+  if isdeterministic()
+    if algo == 0
+      @warn "algorithm 0 (CUDNN_CONVOLUTION_BWD_DATA_ALGO_0) is not deterministic; algorithm 1 is used instead"
+    end
+  end
+
   if version() < v"6"
     all(x -> x == 1, dilation(cdims)) || error("Only dilation = 1 is supported in cuDNN version < 6")
   end
@@ -71,12 +88,26 @@ end
 ∇conv_bias!(db::CuArray{T}, dy::CuArray{T}; alpha=1, beta=0) where T<:CUDNNFloat =
   cudnnConvolutionBackwardBias(db, dy, alpha=alpha, beta=beta)
 
-maxpool!(y::CuArray{T}, x::CuArray{T}, pdims::PoolDims) where T<:CUDNNFloat =
-  cudnnPoolingForward(y, x, pdims; mode=0)
+# Reference for deterministic mode:
+# https://docs.nvidia.com/deeplearning/sdk/cudnn-developer-guide/index.html#cudnnPoolingMode_t
+function maxpool!(y::CuArray{T}, x::CuArray{T}, pdims::PoolDims; mode=isdeterministic() ? 3 : 0) where T<:CUDNNFloat
+  if isdeterministic()
+    if model != 3
+      @warn "mode $mode is not deterministic; mode 3 (CUDNN_POOLING_MAX_DETERMINISTIC) is used instead"
+    end
+  end
+  return cudnnPoolingForward(y, x, pdims; mode=mode)
+end
 
-∇maxpool!(dx::CuArray{T}, dy::CuArray{T}, y::CuArray{T}, x::CuArray{T},
-          pdims::PoolDims) where T<:CUDNNFloat =
-  cudnnPoolingBackward(dx, dy, x, y, pdims, mode=0)
+function ∇maxpool!(dx::CuArray{T}, dy::CuArray{T}, y::CuArray{T}, x::CuArray{T},
+          pdims::PoolDims, mode=isdeterministic() ? 3 : 0) where T<:CUDNNFloat
+  if isdeterministic()
+    if model != 3
+      @warn "mode $mode is not deterministic; mode 3 (CUDNN_POOLING_MAX_DETERMINISTIC) is used instead"
+    end
+  end
+  return cudnnPoolingBackward(dx, dy, x, y, pdims, mode=mode)
+end
 
 meanpool!(y::CuArray{T}, x::CuArray{T}, pdims::PoolDims) where T<:CUDNNFloat =
   cudnnPoolingForward(y, x, pdims, mode=1)
