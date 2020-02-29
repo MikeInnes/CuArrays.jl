@@ -34,6 +34,7 @@ include("mapreduce.jl")
 include("accumulate.jl")
 include("linalg.jl")
 include("nnlib.jl")
+include("statistics.jl")
 
 # vendor libraries
 include("blas/CUBLAS.jl")
