@@ -2,30 +2,36 @@ using NNlib
 
 
 # Activation functions
-@cufunc σ(x) = ifelse(x < -80, zero(x), one(x) / (one(x) + exp(-x)))
+@cufunc σ(x::Real) = ifelse(x < -80, zero(x), one(x) / (one(x) + exp(-x)))
 
-@cufunc function logσ(x)
-  max_v = max(zero(x), -x)
-  z = exp(-max_v) + exp(-x-max_v)
-  -(max_v + log(z))
+@cufunc softplus(x::Real) = ifelse(x > 0, x + log1p(exp(-x)), log1p(exp(x)))
+
+@cufunc logσ(x::Real) = -softplus(-x)
+
+@cufunc elu(x::Real, α = one(x)) = ifelse(x ≥ 0, x / one(x), α * (exp(x) - one(x)))
+
+@cufunc function gelu(x::Real)
+    p = oftype(x / 1, π)
+    λ = oftype(x / 1, √(2 / p))
+    α = oftype(x / 1, 0.044715)
+    h = oftype(x / 1, 0.5)
+    h * x * (one(x) + tanh(λ * (x + α * x^3)))
 end
 
-@cufunc elu(x, α = one(x)) =
-  ifelse(x ≥ 0, x/1, α * (exp(x) - one(x)))
+@cufunc swish(x::Real) = x * σ(x)
 
-@cufunc swish(x) = x * σ(x)
+@cufunc lisht(x::Real) = x * tanh(x)
 
-@cufunc function gelu(x)
-  λ = oftype(x/1, √(2/π))
-  α = oftype(x/1, 0.044715)
-  h = oftype(x/1, 0.5)
-  h * x * (one(x) + tanh(λ * (x + α * x^3)))
+@cufunc function selu(x::Real)
+    λ = oftype(x / 1, 1.0507009873554804934193349852946)
+    α = oftype(x / 1, 1.6732632423543772848170429916717)
+    λ * ifelse(x > 0, x / one(x), α * (exp(x) - one(x)))
 end
 
-@cufunc function selu(x)
-  λ = oftype(x/1, 1.0507009873554804934193349852946)
-  α = oftype(x/1, 1.6732632423543772848170429916717)
-  λ * ifelse(x > 0, x/1, α * (exp(x) - 1))
-end
+@cufunc celu(x::Real, α::Real = one(x)) = ifelse(x ≥ 0, x / one(x), α * (exp(x/α) - one(x))) 
 
-@cufunc softplus(x) = ifelse(x > 0, x + log1p(exp(-x)), log1p(exp(x)))
+@cufunc logcosh(x::Real) = x + softplus(-2x) - log(oftype(x, 2))
+
+@cufunc mish(x::Real) = x * tanh(softplus(x))
+
+@cufunc tanhshrink(x::Real) = x - tanh(x)
