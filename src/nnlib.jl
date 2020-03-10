@@ -1,6 +1,5 @@
 using NNlib
 
-
 # Activation functions
 @cufunc σ(x::Real) = ifelse(x < -80, zero(x), one(x) / (one(x) + exp(-x)))
 
@@ -35,3 +34,18 @@ end
 @cufunc mish(x::Real) = x * tanh(softplus(x))
 
 @cufunc tanhshrink(x::Real) = x - tanh(x)
+
+# Batched matrix multiplication
+
+_BATCHED_GEMM_LIST = [
+    (:(CuArray{T, 3}), 'N'),
+    (:(NNlib.BatchedTranspose{T, <:CuArray{T, 3}}), 'T'),
+    (:(NNlib.BatchedAdjoint{T, <:CuArray{T, 3}}), 'C')
+]
+
+for (TA, transA) in _BATCHED_GEMM_LIST, (TB, transB) in _BATCHED_GEMM_LIST
+    @eval function NNlib.batched_mul!(C::CuArray{T, 3}, A::$TA, B::$TB) where {T<:CUBLAS.CublasFloat}
+        CuArrays.CUBLAS.gemm_strided_batched!($transA, $transB, one(T), NNlib._unbatch(A), NNlib._unbatch(B), zero(T), C)
+        C
+    end
+end
