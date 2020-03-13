@@ -19,9 +19,10 @@ testf(f, xs...; kwargs...) = TestSuite.compare(f, CuArray, xs...; kwargs...)
 
 # pick a suiteable device (by available memory,
 # but also by capability if testing needs to be thorough)
-candidates = [(dev=dev,
+candidates = [(device!(dev);
+               (dev=dev,
                 cap=capability(dev),
-                mem=CuContext(ctx->CUDAdrv.available_memory(), dev))
+                mem=CUDAdrv.available_memory()))
               for dev in devices()]
 thorough = parse(Bool, get(ENV, "CI_THOROUGH", "false"))
 if thorough
@@ -50,6 +51,7 @@ end
 
 include("base.jl")
 include("memory.jl")
+
 include("blas.jl")
 include("rand.jl")
 include("fft.jl")
@@ -58,7 +60,10 @@ include("solver.jl")
 include("sparse_solver.jl")
 include("dnn.jl")
 include("tensor.jl")
+include("iterator.jl")
+
 include("forwarddiff.jl")
+include("nnlib.jl")
 include("statistics.jl")
 
 if haskey(ENV, "CI")
