@@ -59,6 +59,7 @@ include("sparse_solver.jl")
 include("dnn.jl")
 include("tensor.jl")
 include("forwarddiff.jl")
+include("statistics.jl")
 
 if haskey(ENV, "CI")
   CuArrays.memory_status()
