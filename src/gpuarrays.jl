@@ -29,7 +29,7 @@ function GPUArrays.gpu_call(::CuArrayBackend, f, args, total_threads::Int;
         return (threads=threads, blocks=blocks)
     end
 
-    @cuda config=configurator name=name f(CuKernelContext(), args...)
+    total_threads > 0 && @cuda config=configurator name=name f(CuKernelContext(), args...)
 end
 
 function GPUArrays.gpu_call(::CuArrayBackend, f, args, threads::Int, blocks::Int;
