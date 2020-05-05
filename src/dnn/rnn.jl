@@ -101,6 +101,7 @@ end
 hBatch(x::AbstractVector, h::CuVector) = h
 hBatch(x::AbstractMatrix, h::CuVector) = h .*CuArrays.ones(1, size(x, 2))
 hBatch(x::AbstractMatrix, h::CuMatrix) = h .*CuArrays.ones(1, size(h,2) == 1 ? size(x,2) : 1)
+hBatch(x, ::Nothing) = nothing
 
 function forward(rnn::RNNDesc{T}, x::CuArray{T}, h_::CuArray{T}, c_ = nothing, train = Val{false}) where T
   h = hBatch(x, h_)
@@ -197,7 +198,7 @@ function pullback(rnn::RNNDesc{T}, x::CuArray{T}, h::CuArray{T}, c::CuArray{T}) 
   return (y, ho, co), function (dy, dho, dco)
     h_ = CUDNN.hBatch(x, h)
     c_ = CUDNN.hBatch(x, c)
-    dx, dh, dc = CUDNN.backwardData(rnn, y, dy, dho, dco, h_, c_, reserve)
+    dx, dh, dc = CUDNN.backwardData(rnn, y, dy, CUDNN.hBatch(y,dho), dco, h_, c_, reserve)
     (dWi, dWh), db = CUDNN.backwardWeights(rnn, x, h_, y, reserve)
     return (x = dx, h = dh, c = dc, Wi = dWi, Wh = dWh, b = db)
   end
