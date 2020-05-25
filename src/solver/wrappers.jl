@@ -325,6 +325,34 @@ for (fname,elty) in ((:cusolverDnSpotrs, :Float32),
     end
 end
 
+## potri
+for (bname, fname,elty) in ((:cusolverDnSpotri_bufferSize, :cusolverDnSpotri, :Float32),
+                     (:cusolverDnDpotri_bufferSize, :cusolverDnDpotri, :Float64),
+                     (:cusolverDnCpotri_bufferSize, :cusolverDnCpotri, :ComplexF32),
+                     (:cusolverDnZpotri_bufferSize, :cusolverDnZpotri, :ComplexF64))
+    @eval begin
+        function LinearAlgebra.LAPACK.potri!(uplo::Char,
+                        A::CuMatrix{$elty})
+               cuuplo  = CuArrays.CUBLAS.cublasfill(uplo)
+               n       = LinearAlgebra.checksquare(A)
+               lda     = max(1, stride(A, 2))
+
+               devinfo = CuArray{Cint}(undef, 1)
+               CuArrays.@workspace eltyp=$elty size=CuArrays.@argout(
+                       CuArrays.CUSOLVER.$bname(CuArrays.CUSOLVER.dense_handle(), cuuplo, n, A, lda, out(Ref{Cint}(0)))
+                   )[] buffer->begin
+                       CuArrays.CUSOLVER.$fname(CuArrays.CUSOLVER.dense_handle(), cuuplo, n, A, lda, buffer, length(buffer), devinfo)
+                   end
+
+               info = CuArrays.@allowscalar devinfo[1]
+               CuArrays.unsafe_free!(devinfo)
+               LinearAlgebra.LAPACK.chkargsok(LinearAlgebra.BlasInt(info))
+
+               A
+        end
+    end
+end
+
 #getrf
 for (bname, fname,elty) in ((:cusolverDnSgetrf_bufferSize, :cusolverDnSgetrf, :Float32),
                             (:cusolverDnDgetrf_bufferSize, :cusolverDnDgetrf, :Float64),

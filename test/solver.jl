@@ -41,6 +41,32 @@ k = 1
         d_A  = CuArray(A)
         @test_throws LinearAlgebra.PosDefException cholesky(d_A)
     end
+    
+
+    @testset "Cholesky inverse (potri)" begin
+        # test lower
+        A    = rand(elty,n,n)
+        A    = A*A' #posdef
+        d_A  = CuArray(A)
+
+        LinearAlgebra.LAPACK.potrf!('L', A)
+        LinearAlgebra.LAPACK.potrf!('L', d_A)
+        LinearAlgebra.LAPACK.potri!('L', d_A)
+        LinearAlgebra.LAPACK.potri!('L', A)
+        @test A  ≈ collect(d_A)
+
+        # test upper
+        A    = rand(elty,n,n)
+        A    = A*A' #posdef
+        d_A  = CuArray(A)
+
+        LinearAlgebra.LAPACK.potrf!('U', A)
+        LinearAlgebra.LAPACK.potrf!('U', d_A)
+        LinearAlgebra.LAPACK.potri!('U', d_A)
+        LinearAlgebra.LAPACK.potri!('U', A)
+        @test A   ≈ collect(d_A)
+    end
+
 
     @testset "getrf!" begin
         A          = rand(elty,m,n)
