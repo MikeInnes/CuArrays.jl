@@ -1769,10 +1769,7 @@ end
             @test D ≈ h_C
             d_Bᵀ = CuArray(Bᵀ)
             d_C = CuArray(C)
-            mul!(d_C, d_A, transpose(d_Bᵀ))
-            h_C = collect(d_C)
-            D = A * transpose(Bᵀ)
-            @test D ≈ h_C
+            @test_throws CUSPARSEError mul!(d_C, d_A, transpose(d_Bᵀ))
         end
     end
 end
