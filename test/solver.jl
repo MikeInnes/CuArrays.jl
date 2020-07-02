@@ -131,6 +131,20 @@ k = 1
         F          = qr!(A)
         @test h_B  ≈ B*Array(F.Q)
     end
+        
+    @testset "ldiv!" begin
+        A          = rand(elty, n, n)
+        d_A        = CuArray(A)
+        B          = rand(elty, n, n)
+        d_B        = CuArray(B)
+        C          = rand(elty, n, n)
+        d_C        = CuArray(C)
+        F          = qr!(A)
+        d_F        = qr!(d_A)
+        ldiv!(C,F,B)
+        ldiv!(d_C,d_F,d_B)
+        @test C ≈ Array(d_C)
+    end
 
     @testset "orgqr!" begin
         A         = rand(elty,n,m)

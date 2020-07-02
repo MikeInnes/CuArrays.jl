@@ -53,6 +53,12 @@ LinearAlgebra.lmul!(adjA::Adjoint{T,<:CuQRPackedQ{T,S}}, B::CuVecOrMat{T}) where
 LinearAlgebra.lmul!(trA::Transpose{T,<:CuQRPackedQ{T,S}}, B::CuVecOrMat{T}) where {T<:Number, S<:CuMatrix} =
     ormqr!('L', 'T', parent(trA).factors, parent(trA).τ, B)
 
+function LinearAlgebra.ldiv!(x::CuArrays.CuArray,_qr::CuArrays.CUSOLVER.CuQR,b::CuArrays.CuArray)
+      _x = UpperTriangular(_qr.R) \ (_qr.Q' * reshape(b,length(b),1))
+      x .= vec(_x)
+      CuArrays.unsafe_free!(_x)
+end
+
 function Base.getindex(A::CuQRPackedQ{T, S}, i::Integer, j::Integer) where {T, S}
     assertscalar("CuQRPackedQ getindex")
     x = CuArrays.zeros(T, size(A, 2))
